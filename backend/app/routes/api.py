@@ -2,7 +2,7 @@ from pathlib import Path
 from uuid import UUID
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, Response
-from app.config import ROOT
+from app.config import SAMPLES_DIR
 from app.providers.local.extraction import MAX_UPLOAD
 from app.schemas.models import (
     CaseResponse,
@@ -10,6 +10,7 @@ from app.schemas.models import (
     Document,
     DocumentType,
     Job,
+    MemorySummary,
     PresignedUploadResponse,
     ReviewDecision,
     ReviewRequest,
@@ -26,13 +27,17 @@ SAMPLES = {
         "Conflicting details",
         "Identifiers and addresses differ across the packet.",
     ),
+    "formatting": (
+        "Formatting differences",
+        "One form writes the street name with an abbreviation; nothing else differs.",
+    ),
 }
 
 
 def sample_path(sample_id: str, kind: DocumentType) -> Path:
     if sample_id not in SAMPLES:
         raise CaseError("Sample not found.", 404)
-    path = ROOT / "demo" / sample_id / f"{kind.value}.pdf"
+    path = SAMPLES_DIR / sample_id / f"{kind.value}.pdf"
     if not path.exists():
         raise CaseError("Sample PDFs are missing. Run demo/generate.py.", 503)
     return path
@@ -150,9 +155,23 @@ def sample_pdf(sample_id: str, document_type: DocumentType):
 
 @router.post("/samples/{sample_id}/load", response_model=CaseResponse, status_code=201)
 def load_sample(sample_id: str, request: Request):
+    # Works in both modes: the API writes the committed synthetic PDFs to
+    # storage itself (local disk or S3), so the live demo needs no file picker.
     paths = [(kind, sample_path(sample_id, kind)) for kind in DocumentType]
     service = request.app.state.service
     case = service.create(f"Sample — {SAMPLES[sample_id][0]}")
     for kind, path in paths:
         service.upload(case.id, kind, path.read_bytes())
     return service.get(case.id)
+
+
+@router.get("/memory", response_model=MemorySummary)
+def memory_summary(request: Request):
+    """Approved review lessons: privacy-safe patterns and counts only."""
+    return request.app.state.service.memory_summary()
+
+
+@router.post("/memory/reset", response_model=MemorySummary)
+def reset_memory(request: Request):
+    # For rehearsals. Unauthenticated like the rest of this demo API.
+    return request.app.state.service.reset_memory()

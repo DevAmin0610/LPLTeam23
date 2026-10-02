@@ -39,11 +39,24 @@ class Evidence(BaseModel):
     bounding_box: BoundingBox | None = None
 
 
+class FindingMemory(BaseModel):
+    """How reviewers decided this kind of finding in OTHER cases. Advisory only."""
+
+    pattern_label: str
+    accepted: int = 0
+    dismissed: int = 0
+    total: int = 0
+    # Set only when past decisions lean clearly one way; never changes the finding.
+    hint: str | None = None
+
+
 class Finding(BaseModel):
     id: str
     case_id: str
     analysis_run_id: str
     rule_id: str
+    # Privacy-safe kind of finding (no values), used to remember reviewer decisions.
+    pattern: str | None = None
     policy_version: str
     category: Literal[
         "missing_information",
@@ -56,18 +69,39 @@ class Finding(BaseModel):
     explanation: str
     recommended_correction: str
     evidence: list[Evidence] = Field(default_factory=list)
+    memory: FindingMemory | None = None
+
+
+class MemoryPattern(BaseModel):
+    pattern: str
+    label: str
+    accepted: int
+    dismissed: int
+    total: int
+    updated_at: str | None = None
+
+
+class MemorySummary(BaseModel):
+    enabled: bool
+    patterns: list[MemoryPattern] = Field(default_factory=list)
+    total_decisions: int = 0
 
 
 class ReviewDecision(BaseModel):
     finding_id: str
     status: Literal["accepted", "dismissed"]
     note: str | None = Field(default=None, max_length=1000)
+    # True when the reviewer approved this decision as a lesson for similar cases.
+    remember: bool = False
     updated_at: str
 
 
 class ReviewRequest(BaseModel):
     status: Literal["accepted", "dismissed"]
     note: str | None = Field(default=None, max_length=1000)
+    # Explicit approval to reuse this decision (pattern + status only, never the
+    # note) as advisory context for similar findings in other cases.
+    remember: bool = False
 
 
 class Job(BaseModel):

@@ -7,7 +7,11 @@ from app.providers.interfaces import Providers, ProviderError
 from app.providers.local.extraction import LocalPDFExtractor
 from app.providers.local.jobs import LocalJobDispatcher
 from app.providers.local.privacy import LocalPrivacyFilter, TemplateExplanations
-from app.providers.local.storage import LocalDocumentStorage, SQLiteCaseStorage
+from app.providers.local.storage import (
+    LocalDocumentStorage,
+    SQLiteCaseStorage,
+    SQLiteMemoryStore,
+)
 from app.routes.api import router
 from app.services.cases import CaseError, CaseService
 
@@ -21,16 +25,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cases = SQLiteCaseStorage(settings.local_data_dir)
         cases.interrupt_pending()
         providers = Providers(
-            LocalPDFExtractor(),
-            LocalPrivacyFilter(),
-            TemplateExplanations(),
-            LocalDocumentStorage(settings.local_data_dir / "uploads"),
-            cases,
+            extraction=LocalPDFExtractor(),
+            privacy=LocalPrivacyFilter(),
+            explanations=TemplateExplanations(),
+            documents=LocalDocumentStorage(settings.local_data_dir / "uploads"),
+            cases=cases,
+            memory=SQLiteMemoryStore(settings.local_data_dir),
         )
         service = CaseService(providers)
         providers.dispatcher = LocalJobDispatcher(service.process)
         app.state.service = service
-        yield
+        yield       
         providers.dispatcher.close()
 
     app = FastAPI(title="ClearPath — synthetic local starter", lifespan=lifespan)

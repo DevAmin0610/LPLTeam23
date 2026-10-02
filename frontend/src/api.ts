@@ -4,6 +4,7 @@ import type {
   Config,
   DocumentType,
   Job,
+  MemorySummary,
   Mode,
   PresignedUploadResponse,
   ReviewDecision,
@@ -132,6 +133,9 @@ export const api = {
       json("POST"),
       90_000,
     ),
+  memory: (signal?: AbortSignal) =>
+    request<MemorySummary>("/api/memory", { signal }),
+  resetMemory: () => request<MemorySummary>("/api/memory/reset", json("POST")),
   analyze: (id: string) =>
     request<Job>(`${casePath(id)}/analyze`, json("POST")),
   review: (
@@ -139,10 +143,11 @@ export const api = {
     findingId: string,
     status: ReviewStatus,
     note: string,
+    remember = false,
   ) =>
     request<ReviewDecision>(
       `${casePath(caseId)}/findings/${segment(findingId)}/review`,
-      json("PUT", { status, note: note.trim() || null }),
+      json("PUT", { status, note: note.trim() || null, remember }),
     ),
   async upload(
     caseId: string,

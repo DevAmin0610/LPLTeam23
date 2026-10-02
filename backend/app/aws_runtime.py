@@ -6,6 +6,7 @@ from app.providers.aws.adapters import (
     BedrockExplanationGenerator,
     S3DocumentStorage,
     DynamoCaseStorage,
+    DynamoMemoryStore,
     LambdaJobDispatcher,
 )
 from app.services.cases import CaseService
@@ -28,6 +29,8 @@ def create_aws_service(
         documents=S3DocumentStorage(settings),
         cases=DynamoCaseStorage(settings),
         dispatcher=None if worker else LambdaJobDispatcher(settings),
+        # Review memory is read and written by the API only.
+        memory=None if worker else DynamoMemoryStore(settings),
     )
 
     return CaseService(providers)

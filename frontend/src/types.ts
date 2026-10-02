@@ -32,6 +32,8 @@ export interface ReviewDecision {
   finding_id: string;
   status: ReviewStatus;
   note: string | null;
+  /** True when the reviewer approved this decision as a reusable lesson. */
+  remember?: boolean;
   updated_at: string;
 }
 export interface Finding {
@@ -50,6 +52,30 @@ export interface Finding {
   explanation: string;
   recommended_correction: string;
   evidence: Evidence[];
+  /** Privacy-safe kind of finding (no values); keys review memory. */
+  pattern?: string | null;
+  /** How reviewers decided this kind of finding in other cases. Advisory only. */
+  memory?: FindingMemory | null;
+}
+export interface FindingMemory {
+  pattern_label: string;
+  accepted: number;
+  dismissed: number;
+  total: number;
+  hint: string | null;
+}
+export interface MemoryPattern {
+  pattern: string;
+  label: string;
+  accepted: number;
+  dismissed: number;
+  total: number;
+  updated_at: string | null;
+}
+export interface MemorySummary {
+  enabled: boolean;
+  patterns: MemoryPattern[];
+  total_decisions: number;
 }
 export type JobStatus =
   | "queued"

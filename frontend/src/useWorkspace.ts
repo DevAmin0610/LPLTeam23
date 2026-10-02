@@ -5,6 +5,7 @@ import type {
   CaseResponse,
   Config,
   DocumentType,
+  MemorySummary,
   ReviewStatus,
   SamplePacket,
 } from "./types";
@@ -33,6 +34,19 @@ export function useWorkspace() {
   const [pollError, setPollError] = useState("");
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
   const [pollAttempt, setPollAttempt] = useState(0);
+  const [learned, setLearned] = useState<MemorySummary | null>(null);
+
+  // Memory is context, not a dependency: failures leave the panel empty.
+  const refreshLearned = useCallback(async () => {
+    try {
+      setLearned(await api.memory());
+    } catch {
+      /* The review workflow works without it. */
+    }
+  }, []);
+  useEffect(() => {
+    void refreshLearned();
+  }, [refreshLearned]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -224,6 +238,12 @@ export function useWorkspace() {
     active,
     pollError,
     lastSynced,
+    learned,
+    resetMemory: () =>
+      run("memory", async () => {
+        setLearned(await api.resetMemory());
+        setNotice("Review memory cleared.");
+      }),
     clearError: () => setError(""),
     createCase: (name: string) =>
       run("create", async () => {
@@ -241,10 +261,8 @@ export function useWorkspace() {
       }),
     loadSample: (id: string) =>
       run("sample", async () => {
-        if (config?.mode !== "demo")
-          throw new Error(
-            "Loading sample packets is only available in demo mode.",
-          );
+        if (!config)
+          throw new Error("Connect to the API before loading a sample packet.");
         const value = await api.loadSample(id);
         adoptCase(value);
         await startAnalysis(value);
@@ -293,7 +311,12 @@ export function useWorkspace() {
         if (currentCase) adoptCase(await api.getCase(currentCase.id));
         setPollAttempt((attempt) => attempt + 1);
       }),
-    saveReview: (findingId: string, status: ReviewStatus, note: string) =>
+    saveReview: (
+      findingId: string,
+      status: ReviewStatus,
+      note: string,
+      remember = false,
+    ) =>
       run(`review:${findingId}`, async () => {
         if (!currentCase) return;
         const review = await api.review(
@@ -301,6 +324,7 @@ export function useWorkspace() {
           findingId,
           status,
           note,
+          remember,
         );
         setCurrentCase((value) => {
           if (!value || value.id !== currentCase.id) return value;
@@ -321,8 +345,9 @@ export function useWorkspace() {
           };
         });
         setNotice(
-          `Review ${status} and saved. Accepting a finding does not mark its correction complete.`,
+          `Review ${status} and saved${remember ? " and remembered for similar findings" : ""}. Accepting a finding does not mark its correction complete.`,
         );
+        await refreshLearned();
       }),
   };
 }
