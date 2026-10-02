@@ -9,6 +9,7 @@ from app.services.rules import evaluate, finding
 
 log = logging.getLogger("clearpath")
 ACTIVE = {"queued", "processing"}
+LEASE_SECONDS = 300
 
 
 def now():
@@ -58,6 +59,67 @@ class CaseService:
         )
         self.p.cases.create(record)
         return self.get(record["id"])
+
+    def register_upload(self, case_id: str, document_type: DocumentType, filename: str) -> dict:
+        self.record(case_id)
+        document_id = str(uuid4())
+        key = f"{case_id}/{document_id}.pdf"
+        document = dict(
+            id=document_id,
+            case_id=case_id,
+            document_type=document_type.value,
+            filename=f"{document_type.value}.pdf",
+            storage_key=key,
+            size=0,
+            status="pending_upload",
+        )
+
+        def add(record):
+            if record["job"] and record["job"]["status"] in ACTIVE:
+                raise CaseError("Analysis is running; uploads are locked.", 409)
+            if any(
+                d["document_type"] == document_type.value and d["status"] == "uploaded"
+                for d in record["documents"]
+            ):
+                raise CaseError(
+                    "One document per type is supported. Create a new case to replace the packet.",
+                    409,
+                )
+            # Replace any prior pending_upload for the same type.
+            record["documents"] = [
+                d for d in record["documents"]
+                if not (d["document_type"] == document_type.value and d["status"] == "pending_upload")
+            ]
+            record["documents"].append(document)
+            record.update(job=None, findings=[], model_input_preview=[])
+
+        self.p.cases.update(case_id, add)
+        presign = self.p.documents.presign_upload(key)
+        return {"document_id": document_id, **presign}
+
+    def complete_upload(self, case_id: str, document_id: str) -> dict:
+        record = self.record(case_id)
+        doc = next(
+            (d for d in record["documents"] if d["id"] == document_id), None
+        )
+        if not doc:
+            raise CaseError("Document not found in this case.", 404)
+        if doc["status"] == "uploaded":
+            return doc
+        if doc["status"] != "pending_upload":
+            raise CaseError("Document is not awaiting upload completion.", 409)
+        size = self.p.documents.confirm_upload(doc["storage_key"])
+
+        def mark_uploaded(record):
+            for d in record["documents"]:
+                if d["id"] == document_id:
+                    d["status"] = "uploaded"
+                    d["size"] = size
+                    return
+            raise CaseError("Document not found in this case.", 404)
+
+        updated = self.p.cases.update(case_id, mark_uploaded)
+        return next(d for d in updated["documents"] if d["id"] == document_id)
 
     def upload(self, case_id: str, document_type: DocumentType, content: bytes) -> dict:
         self.record(case_id)
@@ -111,6 +173,8 @@ class CaseService:
                 return
             if not record["documents"]:
                 raise CaseError("Upload at least one PDF first.")
+            if any(d["status"] == "pending_upload" for d in record["documents"]):
+                raise CaseError("Complete all pending uploads before analyzing.", 409)
             record.update(findings=[], model_input_preview=[])
             record["job"] = dict(
                 id=run_id,
@@ -163,27 +227,8 @@ class CaseService:
         self.p.cases.update(case_id, change)
 
     def process(self, case_id: str, run_id: str) -> None:
-        # Atomic claim makes local duplicate deliveries no-ops. AWS leases/recovery
-        # must be implemented before enabling AWS composition (see handoff).
-        claimed = False
-
-        def claim(record):
-            nonlocal claimed
-            if (
-                record["job"]
-                and record["job"]["id"] == run_id
-                and record["job"]["status"] == "queued"
-            ):
-                record["job"].update(
-                    status="processing",
-                    stage="Extracting PDFs",
-                    progress=10,
-                    updated_at=now(),
-                )
-                claimed = True
-
-        self.p.cases.update(case_id, claim)
-        if not claimed:
+        owner = str(uuid4())
+        if not self.p.cases.claim_run(case_id, run_id, owner, LEASE_SECONDS):
             return
         try:
             record = self.record(case_id)
@@ -221,13 +266,9 @@ class CaseService:
                 failures.append(
                     "Some fields or documents require manual review; this is not an all-clear."
                 )
-            self._job(
-                case_id, run_id, stage="Sample rules and privacy checks", progress=65
-            )
+            self._job(case_id, run_id, stage="Sample rules and privacy checks", progress=65)
             previews = []
             for item in findings:
-                # Only trusted rule-generated prose enters this allowlisted payload.
-                # No identifiers, source document text, names, or addresses are sent.
                 payload = {
                     "rule_id": item["rule_id"].split(":")[0],
                     "comparison_result": item["category"],
@@ -253,23 +294,18 @@ class CaseService:
                         "An explanation was withheld or unavailable. The deterministic finding is preserved."
                     )
 
-            def finish(latest):
-                if latest["job"]["id"] != run_id:
-                    return
-                latest.update(findings=findings, model_input_preview=previews)
-                latest["job"].update(
-                    status="partial" if failures else "completed",
-                    progress=100,
-                    stage="Review required" if failures else "Analysis complete",
-                    errors=list(dict.fromkeys(failures)),
-                    updated_at=now(),
-                )
-                # Never replace reviews when publishing machine results.
-
-            self.p.cases.update(case_id, finish)
-            log.info(
-                "case=%s status=%s", case_id, "partial" if failures else "completed"
+            result = dict(
+                findings=findings,
+                model_input_preview=previews,
+                status="partial" if failures else "completed",
+                progress=100,
+                stage="Review required" if failures else "Analysis complete",
+                errors=list(dict.fromkeys(failures)),
             )
+            if not self.p.cases.finish_run(case_id, run_id, owner, result):
+                log.warning("case=%s category=finish_lost_ownership", case_id)
+                return
+            log.info("case=%s status=%s", case_id, result["status"])
         except Exception:
             self._job(
                 case_id,

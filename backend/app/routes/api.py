@@ -10,9 +10,11 @@ from app.schemas.models import (
     Document,
     DocumentType,
     Job,
+    PresignedUploadResponse,
     ReviewDecision,
     ReviewRequest,
     SamplePacket,
+    UploadRequest,
 )
 from app.services.cases import CaseError
 
@@ -58,6 +60,19 @@ def create_case(body: CreateCase, request: Request):
 @router.get("/cases/{case_id}", response_model=CaseResponse)
 def get_case(case_id: UUID, request: Request):
     return request.app.state.service.get(str(case_id))
+
+
+@router.post("/cases/{case_id}/uploads", response_model=PresignedUploadResponse, status_code=201)
+def request_upload(case_id: UUID, body: UploadRequest, request: Request):
+    result = request.app.state.service.register_upload(
+        str(case_id), body.document_type, body.filename
+    )
+    return result
+
+
+@router.post("/cases/{case_id}/documents/{document_id}/complete", response_model=Document)
+def complete_upload(case_id: UUID, document_id: UUID, request: Request):
+    return request.app.state.service.complete_upload(str(case_id), str(document_id))
 
 
 @router.post("/cases/{case_id}/documents", response_model=Document, status_code=201)

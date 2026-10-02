@@ -13,6 +13,7 @@ import math
 import random
 import threading
 import time
+import time
 from typing import Any, Callable, Literal
 
 from app.providers.interfaces import (
@@ -468,6 +469,127 @@ class DynamoCaseStorage(_AWSProvider):
         # A Lambda cold start is not a process-wide interruption. Worker run/lease
         # checks, not API lifecycle hooks, own recovery of abandoned jobs.
         return None
+
+    def _lease_expired(self, job: dict[str, Any]) -> bool:
+        expires = job.get("lease_expires_at")
+        return expires is None or time.time() > expires
+
+    def claim_run(
+        self, case_id: str, run_id: str, owner: str, lease_seconds: int
+    ) -> bool:
+        for attempt in range(self.MAX_UPDATE_ATTEMPTS):
+            current = self._read(case_id)
+            if current is None:
+                return False
+            record, version = current
+            job = record.get("job")
+            if not job or job.get("id") != run_id:
+                return False
+            status = job.get("status")
+            if not (status == "queued" or (
+                status == "processing" and self._lease_expired(job)
+            )):
+                return False
+            job.update(
+                status="processing",
+                lease_owner=owner,
+                lease_expires_at=time.time() + lease_seconds,
+            )
+            _, data = self._record(record)
+            try:
+                self._client("dynamodb").put_item(
+                    TableName=_setting(self.settings, "dynamodb_cases_table"),
+                    Item={"id": {"S": case_id}, "data": {"S": data}, "version": {"N": str(version + 1)}},
+                    ConditionExpression="attribute_exists(#id) AND #version = :expected",
+                    ExpressionAttributeNames={"#id": "id", "#version": "version"},
+                    ExpressionAttributeValues={":expected": {"N": str(version)}},
+                )
+                return True
+            except Exception as error:
+                if not self._conflict(error):
+                    raise ProviderError("case_write_failed") from None
+                if attempt + 1 < self.MAX_UPDATE_ATTEMPTS:
+                    time.sleep(random.uniform(0, min(0.01 * (2**attempt), 0.2)))
+        return False
+
+    def renew_run(
+        self, case_id: str, run_id: str, owner: str, lease_seconds: int
+    ) -> bool:
+        for attempt in range(self.MAX_UPDATE_ATTEMPTS):
+            current = self._read(case_id)
+            if current is None:
+                return False
+            record, version = current
+            job = record.get("job")
+            if not (
+                job
+                and job.get("id") == run_id
+                and job.get("status") == "processing"
+                and job.get("lease_owner") == owner
+            ):
+                return False
+            job["lease_expires_at"] = time.time() + lease_seconds
+            _, data = self._record(record)
+            try:
+                self._client("dynamodb").put_item(
+                    TableName=_setting(self.settings, "dynamodb_cases_table"),
+                    Item={"id": {"S": case_id}, "data": {"S": data}, "version": {"N": str(version + 1)}},
+                    ConditionExpression="attribute_exists(#id) AND #version = :expected",
+                    ExpressionAttributeNames={"#id": "id", "#version": "version"},
+                    ExpressionAttributeValues={":expected": {"N": str(version)}},
+                )
+                return True
+            except Exception as error:
+                if not self._conflict(error):
+                    raise ProviderError("case_write_failed") from None
+                if attempt + 1 < self.MAX_UPDATE_ATTEMPTS:
+                    time.sleep(random.uniform(0, min(0.01 * (2**attempt), 0.2)))
+        return False
+
+    def finish_run(
+        self, case_id: str, run_id: str, owner: str, result: dict[str, Any]
+    ) -> bool:
+        for attempt in range(self.MAX_UPDATE_ATTEMPTS):
+            current = self._read(case_id)
+            if current is None:
+                return False
+            record, version = current
+            job = record.get("job")
+            if not (
+                job
+                and job.get("id") == run_id
+                and job.get("status") == "processing"
+                and job.get("lease_owner") == owner
+            ):
+                return False
+            record.update(
+                findings=result.get("findings", []),
+                model_input_preview=result.get("model_input_preview", []),
+            )
+            job.update(
+                status=result["status"],
+                progress=result["progress"],
+                stage=result["stage"],
+                errors=result["errors"],
+            )
+            job.pop("lease_owner", None)
+            job.pop("lease_expires_at", None)
+            _, data = self._record(record)
+            try:
+                self._client("dynamodb").put_item(
+                    TableName=_setting(self.settings, "dynamodb_cases_table"),
+                    Item={"id": {"S": case_id}, "data": {"S": data}, "version": {"N": str(version + 1)}},
+                    ConditionExpression="attribute_exists(#id) AND #version = :expected",
+                    ExpressionAttributeNames={"#id": "id", "#version": "version"},
+                    ExpressionAttributeValues={":expected": {"N": str(version)}},
+                )
+                return True
+            except Exception as error:
+                if not self._conflict(error):
+                    raise ProviderError("case_write_failed") from None
+                if attempt + 1 < self.MAX_UPDATE_ATTEMPTS:
+                    time.sleep(random.uniform(0, min(0.01 * (2**attempt), 0.2)))
+        return False
 
 
 class LambdaJobDispatcher(_AWSProvider):
