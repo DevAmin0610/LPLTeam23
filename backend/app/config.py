@@ -7,12 +7,11 @@ ROOT = Path(__file__).resolve().parents[2]
 SAMPLES_DIR = Path(__file__).resolve().parent / "samples"
 
 
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore")
     app_mode: str = "demo"
     local_data_dir: Path = ROOT / "local-data"
-    cors_allowed_origins: str = "http://localhost:5173"
+    cors_allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     aws_region: str = ""
     aws_profile: str = ""
     bedrock_model_id: str = ""
@@ -22,7 +21,7 @@ class Settings(BaseSettings):
     dynamodb_cases_table: str = ""
     worker_lambda_function_name: str = ""
 
-    def validate_mode(self, *, worker:bool = False) -> None:
+    def validate_mode(self, *, worker: bool = False) -> None:
         if self.app_mode not in {"demo", "aws"}:
             raise ValueError("APP_MODE must be demo or aws.")
         if self.app_mode == "aws":
@@ -43,4 +42,3 @@ class Settings(BaseSettings):
             ]
             if missing:
                 raise ValueError("AWS configuration missing: " + ", ".join(missing))
-            
