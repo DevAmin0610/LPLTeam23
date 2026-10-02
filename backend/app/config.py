@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     dynamodb_cases_table: str = ""
     worker_lambda_function_name: str = ""
 
-    def validate_mode(self) -> None:
+    def validate_mode(self, *, worker:bool = False) -> None:
         if self.app_mode not in {"demo", "aws"}:
             raise ValueError("APP_MODE must be demo or aws.")
         if self.app_mode == "aws":
@@ -29,13 +29,14 @@ class Settings(BaseSettings):
                 "bedrock_guardrail_version",
                 "s3_document_bucket",
                 "dynamodb_cases_table",
-                "worker_lambda_function_name",
             ]
+
+            if not worker:
+                required.append("worker_lambda_function_name")
+
             missing = [
                 key.upper() for key in required if not getattr(self, key).strip()
             ]
             if missing:
                 raise ValueError("AWS configuration missing: " + ", ".join(missing))
-            raise ValueError(
-                "AWS composition is not enabled in this starter. See docs/handoff.md; no demo fallback is permitted."
-            )
+            

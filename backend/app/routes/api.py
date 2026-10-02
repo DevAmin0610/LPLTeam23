@@ -37,11 +37,16 @@ def sample_path(sample_id: str, kind: DocumentType) -> Path:
 
 
 @router.get("/config")
-def config():
+def config(request: Request):
+    mode = request.app.state.settings.app_mode
     return {
-        "mode": "demo",
-        "banner": "Demo mode — local extraction and simulated AI explanations.",
-        "privacy_notice": "Synthetic data only. Local masking is a demonstration, not production-grade PII detection.",
+        "mode": mode,
+        "banner": (
+            "AWS mode — document analysis uses AWS providers."
+            if mode == "aws"
+            else "Demo mode — local extraction and simulated AI explanations."
+        ),
+        "privacy_notice": "Synthetic data only.",
     }
 
 
