@@ -13,13 +13,13 @@ import math
 import random
 import threading
 import time
-import time
 from typing import Any, Callable, Literal
 
 from app.providers.interfaces import (
     Extraction,
     PrivacyResult,
     ProviderError,
+    Rejected,
     TextLine,
     UnsupportedDocument,
 )
@@ -438,7 +438,9 @@ class DynamoCaseStorage(_AWSProvider):
                 # Review history is append/update-only. A worker replacing its own
                 # findings must not implicitly erase existing human decisions.
                 record["reviews"] = {**original_reviews, **record.get("reviews", {})}
-            except ProviderError:
+            except (ProviderError, Rejected):
+                # Business errors (404/409) must reach the API unchanged, not
+                # turn into a 503 "provider unavailable".
                 raise
             except Exception:
                 raise ProviderError("case_mutation_failed") from None
@@ -590,6 +592,37 @@ class DynamoCaseStorage(_AWSProvider):
                 if attempt + 1 < self.MAX_UPDATE_ATTEMPTS:
                     time.sleep(random.uniform(0, min(0.01 * (2**attempt), 0.2)))
         return False
+
+
+class DynamoMemoryStore(DynamoCaseStorage):
+    """Review memory as one versioned item in the cases table.
+
+    Reusing the table and its optimistic-locking writes means no new resources
+    or IAM permissions. The key is not a UUID, so the case API can never read it.
+    """
+
+    KEY = "memory#v1"
+
+    def get(self) -> dict[str, Any]:  # type: ignore[override]
+        record = super().get(self.KEY)
+        return record if record is not None else {"id": self.KEY, "patterns": {}}
+
+    def update(  # type: ignore[override]
+        self, mutate: Callable[[dict[str, Any]], None]
+    ) -> dict[str, Any]:
+        for _ in range(2):
+            try:
+                return super().update(self.KEY, mutate)
+            except ProviderError as error:
+                if str(error) != "case_not_found":
+                    raise
+            try:
+                self.create({"id": self.KEY, "patterns": {}})
+            except ProviderError as error:
+                # Another writer created it first; retry the update.
+                if str(error) != "case_already_exists":
+                    raise
+        raise ProviderError("memory_update_failed")
 
 
 class LambdaJobDispatcher(_AWSProvider):

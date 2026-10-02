@@ -10,6 +10,100 @@ POLICY = json.loads(
     (Path(__file__).resolve().parents[1] / "policies/sample-v1.json").read_text()
 )
 
+# ---- privacy-safe patterns for review memory ---------------------------------
+#
+# A pattern names the KIND of finding (for example "address differs only by
+# abbreviation") so reviewer decisions can be remembered across cases. Patterns
+# are fixed strings built from rule IDs, document types and field labels. They
+# never contain field values, names, identifiers or document IDs.
+
+_STREET_WORDS = {
+    "st": "street",
+    "rd": "road",
+    "ln": "lane",
+    "ave": "avenue",
+    "av": "avenue",
+    "dr": "drive",
+    "blvd": "boulevard",
+    "ct": "court",
+    "pl": "place",
+    "ter": "terrace",
+    "hwy": "highway",
+    "pkwy": "parkway",
+    "cir": "circle",
+    "apt": "apartment",
+    "ste": "suite",
+    "n": "north",
+    "s": "south",
+    "e": "east",
+    "w": "west",
+}
+
+PATTERN_LABELS = {
+    "ADDRESS_REVIEW:formatting_only": "Address differs only by abbreviations or punctuation",
+    "ADDRESS_REVIEW:different": "Address is a different location",
+    "SSN_MATCH:transposed_digits": "SSN has two neighboring digits swapped",
+    "SSN_MATCH:different": "SSN is a different number",
+    "ACCOUNT_MATCH:formatting_only": "Account number differs only by dashes or spaces",
+    "ACCOUNT_MATCH:different": "Account number is a different account",
+    "EXTRACTION": "Document could not be read",
+    "LAYOUT": "Document layout not recognized",
+}
+
+
+def pattern_label(pattern: str) -> str:
+    if pattern in PATTERN_LABELS:
+        return PATTERN_LABELS[pattern]
+    kind, _, rest = pattern.partition(":")
+    doc, _, field = rest.partition(":")
+    where = doc.replace("_", " ")
+    if kind == "REQUIRED" and field:
+        return f"{field} missing on the {where}"
+    if kind == "UNCERTAIN" and field:
+        return f"{field} unreadable on the {where}"
+    if kind == "DOCUMENT" and doc:
+        return f"{where.capitalize()} not supplied"
+    return pattern.replace("_", " ").replace(":", " · ")
+
+
+def _address_key(value: str) -> str:
+    words = re.sub(r"[^\w\s]", " ", value.casefold()).split()
+    return " ".join(_STREET_WORDS.get(w, w) for w in words)
+
+
+def _transposed(a: str, b: str) -> bool:
+    if len(a) != len(b):
+        return False
+    diff = [i for i in range(len(a)) if a[i] != b[i]]
+    return (
+        len(diff) == 2
+        and diff[1] == diff[0] + 1
+        and a[diff[0]] == b[diff[1]]
+        and a[diff[1]] == b[diff[0]]
+    )
+
+
+def comparison_pattern(rule_id: str, field: str, values: list[str]) -> str:
+    """Classify a mismatch on ORIGINAL values; only the label leaves this function."""
+    if field == "Address":
+        same = len({_address_key(v) for v in values}) == 1
+        return f"{rule_id}:{'formatting_only' if same else 'different'}"
+    if field == "SSN":
+        digits = [re.sub(r"\D", "", v) for v in values]
+        unique = sorted(set(digits))
+        swapped = len(unique) == 2 and _transposed(*unique)
+        return f"{rule_id}:{'transposed_digits' if swapped else 'different'}"
+    if field == "Account Number":
+        squashed = {re.sub(r"[\s-]", "", v).casefold() for v in values}
+        return f"{rule_id}:{'formatting_only' if len(squashed) == 1 else 'different'}"
+    return rule_id
+
+
+def default_pattern(rule_id: str) -> str:
+    kind = rule_id.split(":", 1)[0]
+    # These rule IDs embed a document ID; the pattern must not.
+    return kind if kind in {"EXTRACTION", "LAYOUT"} else rule_id
+
 
 def finding(
     case_id,
@@ -20,12 +114,14 @@ def finding(
     correction,
     evidence=None,
     severity="medium",
+    pattern=None,
 ):
     return {
         "id": str(uuid5(NAMESPACE_URL, f"{case_id}/{run_id}/{rule_id}")),
         "case_id": case_id,
         "analysis_run_id": run_id,
         "rule_id": rule_id,
+        "pattern": pattern or default_pattern(rule_id),
         "policy_version": POLICY["version"],
         "category": category,
         "severity": severity,
@@ -165,9 +261,12 @@ def evaluate(
                     rule["id"],
                     rule["category"],
                     explanation,
-                    f"Confirm the correct {key.lower()} with the client and reconcile the packet.",
+                    f"Confirm the correct {key if key.isupper() else key.lower()} with the client and reconcile the packet.",
                     evidence,
                     rule["severity"],
+                    comparison_pattern(
+                        rule["id"], key, [fields[key] for _, fields in candidates]
+                    ),
                 )
             )
     return findings

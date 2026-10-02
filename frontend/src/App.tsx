@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { apiUrl, documentUrl, safePreview, validatePdf } from "./api";
 import { DOCUMENT_TYPES, categoryLabel, documentLabel } from "./types";
-import type { DocumentType, Evidence } from "./types";
+import type {
+  DocumentType,
+  Evidence,
+  FindingMemory,
+  MemorySummary,
+} from "./types";
 import { useWorkspace } from "./useWorkspace";
 import "./style.css";
 
@@ -14,6 +19,7 @@ export default function App() {
   const [fileError, setFileError] = useState("");
   const [selected, setSelected] = useState<Evidence | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [remember, setRemember] = useState<Record<string, boolean>>({});
   const c = w.currentCase;
   const busy = !!w.busy || w.restoring;
   const doc =
@@ -91,9 +97,7 @@ export default function App() {
             <p className="muted">{packet?.description}</p>
             <button
               className="primary"
-              disabled={
-                busy || !w.config || !packet || w.config.mode !== "demo"
-              }
+              disabled={busy || !w.config || !packet}
               onClick={() => {
                 setSelected(null);
                 void w.loadSample(sample);
@@ -287,9 +291,13 @@ export default function App() {
                         <span>{categoryLabel[f.category]}</span>
                         <span>{review?.status ?? "pending"}</span>
                       </div>
-                      <h3>{f.rule_id.replaceAll("_", " ")}</h3>
+                      <h3>
+                        {f.memory?.pattern_label ??
+                          f.rule_id.replaceAll("_", " ")}
+                      </h3>
                       <p>{f.explanation}</p>
                       <p className="correction">{f.recommended_correction}</p>
+                      {f.memory && <MemoryNote memory={f.memory} />}
                       <div className="evidence-links">
                         {f.evidence.map((ev, i) => (
                           <button key={i} onClick={() => setSelected(ev)}>
@@ -315,6 +323,29 @@ export default function App() {
                           }
                         />
                       </label>
+                      {f.pattern && (
+                        <label className="remember">
+                          <input
+                            type="checkbox"
+                            checked={
+                              remember[f.id] ?? review?.remember ?? false
+                            }
+                            onChange={(e) =>
+                              setRemember({
+                                ...remember,
+                                [f.id]: e.target.checked,
+                              })
+                            }
+                          />
+                          <span>
+                            Remember this decision for similar findings
+                            <small>
+                              Saves only the kind of finding and your decision.
+                              Never names, numbers or notes.
+                            </small>
+                          </span>
+                        </label>
+                      )}
                       <div className="actions">
                         <button
                           className={
@@ -326,6 +357,7 @@ export default function App() {
                               f.id,
                               "accepted",
                               notes[f.id] ?? review?.note ?? "",
+                              remember[f.id] ?? review?.remember ?? false,
                             )
                           }
                         >
@@ -338,6 +370,7 @@ export default function App() {
                               f.id,
                               "dismissed",
                               notes[f.id] ?? review?.note ?? "",
+                              remember[f.id] ?? review?.remember ?? false,
                             )
                           }
                         >
@@ -349,6 +382,11 @@ export default function App() {
                 })}
               </section>
             </div>
+            <LearnedPanel
+              summary={w.learned}
+              busy={busy}
+              onReset={() => void w.resetMemory()}
+            />
             <div className="bottom-grid">
               <section className="panel">
                 <h2>Correction checklist</h2>
@@ -407,5 +445,83 @@ export default function App() {
         </footer>
       </main>
     </>
+  );
+}
+
+function lean(m: { accepted: number; dismissed: number; total: number }) {
+  if (!m.total) return "none";
+  if (m.dismissed / m.total >= 0.75) return "dismissed";
+  if (m.accepted / m.total >= 0.75) return "confirmed";
+  return "split";
+}
+
+// Past reviewer decisions on this kind of finding. Advisory: it never changes
+// the finding, its severity or its place in the checklist.
+function MemoryNote({ memory }: { memory: FindingMemory }) {
+  const kind = lean(memory);
+  return (
+    <div className={`memory memory-${kind}`}>
+      <strong>Review memory</strong>
+      <p>{memory.hint ?? "No past reviews of this kind of finding yet."}</p>
+      {memory.total > 0 && (
+        <small>
+          {memory.dismissed} dismissed · {memory.accepted} confirmed in other
+          cases
+        </small>
+      )}
+    </div>
+  );
+}
+
+function LearnedPanel({
+  summary,
+  busy,
+  onReset,
+}: {
+  summary: MemorySummary | null;
+  busy: boolean;
+  onReset: () => void;
+}) {
+  if (!summary?.enabled) return null;
+  return (
+    <section className="panel learned" aria-live="polite">
+      <div className="learned-head">
+        <div>
+          <h2>
+            What ClearPath has learned{" "}
+            <span className="count">{summary.total_decisions}</span>
+          </h2>
+          <p className="muted">
+            Decisions reviewers chose to remember, grouped by kind of finding.
+            Patterns and counts only: no names, identifiers or notes. Advisory:
+            it never changes a finding, and you still make every call.
+          </p>
+        </div>
+        <button
+          disabled={busy || !summary.total_decisions}
+          onClick={onReset}
+          title="Clear remembered decisions (for rehearsals)"
+        >
+          Reset memory
+        </button>
+      </div>
+      {summary.patterns.length ? (
+        <ul className="learned-list">
+          {summary.patterns.map((p) => (
+            <li key={p.pattern} className={`memory-${lean(p)}`}>
+              <span>{p.label}</span>
+              <span className="learned-counts">
+                {p.dismissed} dismissed · {p.accepted} confirmed
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>
+          Nothing yet. Tick “Remember this decision” when you accept or dismiss
+          a finding.
+        </p>
+      )}
+    </section>
   );
 }

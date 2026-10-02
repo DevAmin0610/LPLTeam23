@@ -6,6 +6,37 @@ from typing import Any, Callable
 from app.providers.interfaces import ProviderError
 
 
+class SQLiteMemoryStore:
+    """Review memory in the same local SQLite file, in its own table."""
+
+    def __init__(self, directory: Path):
+        directory.mkdir(parents=True, exist_ok=True)
+        self.path = directory / "clearpath.sqlite3"
+        with self._connect() as db:
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS memory (id TEXT PRIMARY KEY, data TEXT NOT NULL)"
+            )
+
+    def _connect(self):
+        return sqlite3.connect(self.path, timeout=10)
+
+    def get(self) -> dict[str, Any]:
+        with self._connect() as db:
+            row = db.execute("SELECT data FROM memory WHERE id = 'v1'").fetchone()
+        return json.loads(row[0]) if row else {"patterns": {}}
+
+    def update(self, mutate: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT data FROM memory WHERE id = 'v1'").fetchone()
+            data = json.loads(row[0]) if row else {"patterns": {}}
+            mutate(data)
+            db.execute(
+                "INSERT OR REPLACE INTO memory VALUES ('v1', ?)", (json.dumps(data),)
+            )
+        return data
+
+
 class SQLiteCaseStorage:
     def __init__(self, directory: Path):
         directory.mkdir(parents=True, exist_ok=True)

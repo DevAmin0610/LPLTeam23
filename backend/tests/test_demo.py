@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
-from app.config import Settings
+from app.config import SAMPLES_DIR, Settings
 from app.main import create_app
 from app.providers.interfaces import PrivacyResult
 from app.schemas.models import ReviewRequest
@@ -223,7 +223,7 @@ def test_presigned_upload_flow(client):
     )
     # Use a pre-generated sample PDF so we don't need reportlab in the test.
     sample_pdf = (
-        Path(__file__).resolve().parents[2] / "demo" / "complete" / "client_profile.pdf"
+        SAMPLES_DIR / "complete" / "client_profile.pdf"
     )
     service.p.documents.put(storage_key, sample_pdf.read_bytes())
 

@@ -2,6 +2,10 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
+# Synthetic sample packets ship inside the app package so the Lambda bundle
+# (which copies only backend/app) includes them for "Load sample case".
+SAMPLES_DIR = Path(__file__).resolve().parent / "samples"
+
 
 
 class Settings(BaseSettings):

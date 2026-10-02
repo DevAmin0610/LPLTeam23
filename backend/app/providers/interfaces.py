@@ -12,6 +12,14 @@ class UnsupportedDocument(ProviderError):
     pass
 
 
+class Rejected(Exception):
+    """A business-rule refusal raised inside a storage mutation.
+
+    Storage providers must re-raise it unchanged (not wrap it as a provider
+    failure) so the API returns the intended 4xx instead of a 503.
+    """
+
+
 @dataclass
 class TextLine:
     text: str
@@ -69,6 +77,17 @@ class JobDispatcher(Protocol):
     def close(self) -> None: ...
 
 
+class MemoryStore(Protocol):
+    """Cross-case review memory: one small record of pattern -> approved decisions.
+
+    Holds only privacy-safe pattern names, case IDs and decision statuses,
+    never field values, names, identifiers or reviewer notes.
+    """
+
+    def get(self) -> dict[str, Any]: ...
+    def update(self, mutate: Callable[[dict[str, Any]], None]) -> dict[str, Any]: ...
+
+
 @dataclass
 class Providers:
     extraction: DocumentExtractor
@@ -77,3 +96,4 @@ class Providers:
     documents: DocumentStorage
     cases: CaseStorage
     dispatcher: JobDispatcher | None = field(default=None)
+    memory: MemoryStore | None = field(default=None)

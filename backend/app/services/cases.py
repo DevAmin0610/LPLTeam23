@@ -2,9 +2,15 @@ import json
 import logging
 from datetime import datetime, timezone
 from uuid import uuid4
-from app.providers.interfaces import Providers, ProviderError, UnsupportedDocument
+from app.providers.interfaces import (
+    Providers,
+    ProviderError,
+    Rejected,
+    UnsupportedDocument,
+)
 from app.providers.local.extraction import MAX_UPLOAD
 from app.schemas.models import CaseResponse, DocumentType, ReviewRequest
+from app.services import memory
 from app.services.rules import evaluate, finding
 
 log = logging.getLogger("clearpath")
@@ -16,7 +22,7 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-class CaseError(Exception):
+class CaseError(Rejected):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
@@ -44,6 +50,15 @@ class CaseService:
             for f in record["findings"]
             if reviews.get(f["id"], {}).get("status") != "dismissed"
         ]
+        if self.p.memory and any(f.get("pattern") for f in record["findings"]):
+            try:
+                learned = self.p.memory.get()
+                for f in record["findings"]:
+                    if f.get("pattern"):
+                        f["memory"] = memory.history(learned, f["pattern"], case_id)
+            except Exception:
+                # Memory is advisory context, not a dependency: the case still loads.
+                log.warning("case=%s category=memory_read_failed", case_id)
         return CaseResponse.model_validate(record)
 
     def create(self, name: str) -> CaseResponse:
@@ -210,14 +225,60 @@ class CaseService:
     def review(self, case_id: str, finding_id: str, request: ReviewRequest):
         self.record(case_id)
         decision = dict(finding_id=finding_id, **request.model_dump(), updated_at=now())
+        reviewed: dict = {}
 
         def save(record):
-            if not any(f["id"] == finding_id for f in record["findings"]):
+            item = next((f for f in record["findings"] if f["id"] == finding_id), None)
+            if item is None:
                 raise CaseError("Finding not found in this analysis.", 404)
             record["reviews"][finding_id] = decision
+            reviewed.update(item)
 
         self.p.cases.update(case_id, save)
+        self._remember(case_id, reviewed.get("pattern"), decision)
         return decision
+
+    # ---- review memory -------------------------------------------------------
+
+    def _remember(self, case_id: str, pattern: str | None, decision: dict) -> None:
+        """Store an APPROVED lesson, or withdraw it. Never fails the review itself.
+
+        Only decisions the reviewer explicitly marks "remember" become lessons
+        (see docs/product-direction.md). Saving the same finding again without
+        "remember" withdraws this case's lesson. Notes are never stored.
+        """
+        if not self.p.memory or not pattern:
+            return
+        try:
+            if decision.get("remember"):
+                self.p.memory.update(
+                    lambda data: memory.record(
+                        data,
+                        pattern,
+                        case_id,
+                        decision["status"],
+                        decision["updated_at"],
+                    )
+                )
+            else:
+                self.p.memory.update(lambda data: memory.forget(data, pattern, case_id))
+        except Exception:
+            log.warning("case=%s category=memory_write_failed", case_id)
+
+    def memory_summary(self) -> dict:
+        if not self.p.memory:
+            return dict(enabled=False, patterns=[], total_decisions=0)
+        rows = memory.summary(self.p.memory.get())
+        return dict(
+            enabled=True,
+            patterns=rows,
+            total_decisions=sum(r["total"] for r in rows),
+        )
+
+    def reset_memory(self) -> dict:
+        if self.p.memory:
+            self.p.memory.update(lambda data: data.update(patterns={}))
+        return self.memory_summary()
 
     def _job(self, case_id, run_id, **changes):
         def change(record):
