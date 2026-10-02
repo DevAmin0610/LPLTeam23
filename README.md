@@ -2,6 +2,12 @@
 
 A runnable **starter**, deliberately stopped short of the full MVP for frontend/backend/infrastructure team handoff. Independent LPL Financial hackathon prototype; **not endorsed by LPL, not actual LPL policy, and not a regulatory compliance guarantee**. Use synthetic data only.
 
+## Product direction
+
+ClearPath is intended to turn **validated reviewer rationale into reusable institutional knowledge**: approved, sanitized lessons from prior document reviews could help explain recurring issues and suggest better next steps without fine-tuning the model. AgentCore Memory is a **planned proof of concept, not an implemented integration**. Lessons are advisory; source evidence and versioned rules remain authoritative.
+
+Read [the product direction](docs/product-direction.md) for the feedback loop, privacy boundaries, and evaluation scope. The current starter stores review decisions and notes but does not learn from them or send them to memory.
+
 ## Run locally
 
 Requirements: Python 3.12+, Node.js 22.12+ (or 24), npm. From the repository root:

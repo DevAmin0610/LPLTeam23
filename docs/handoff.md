@@ -2,6 +2,12 @@
 
 The user requested a minimal pushable baseline instead of finishing every original acceptance criterion. The local vertical slice works; the AWS stack/adapters are **draft, unverified integration code**, not a deployed system.
 
+## Product direction: planned reviewer-feedback memory loop
+
+Read [the product direction](product-direction.md) before extending this starter. The team plans to explore AgentCore Memory to turn validated reviewer rationale into sanitized, explicitly approved reusable lessons. The initial proof of concept should improve explanations and suggested next steps for similar synthetic cases, not change deterministic findings or approve cases.
+
+No memory integration, lesson approval workflow, or structured review reason exists yet. Current free-text notes must not be ingested directly. Plan access isolation, provenance, policy-version applicability, revocation, asynchronous extraction, and evaluation before implementing shared memory. AgentCore Runtime and a knowledge graph are not prerequisites. Workshop AWS processing is restricted to `us-east-1`; confirm all model/memory processing constraints.
+
 ## Ownership boundaries
 
 | Team           | Owns                | Next work                                                                                                                                                              |
