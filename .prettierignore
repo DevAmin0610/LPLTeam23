@@ -1,0 +1,9 @@
+.venv/
+node_modules/
+**/node_modules/
+**/.npm-cache/
+**/dist/
+**/cdk.out/
+local-data/
+**/package-lock.json
+*.pdf

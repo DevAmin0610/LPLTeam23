@@ -1,0 +1,7 @@
+{
+  "app": "node dist/bin/clearpath.js",
+  "versionReporting": false,
+  "context": {
+    "@aws-cdk/aws-lambda:useCdkManagedLogGroup": false
+  }
+}

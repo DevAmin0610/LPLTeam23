@@ -1,0 +1,14 @@
+{
+  "name": "clearpath-workspace",
+  "private": true,
+  "scripts": {
+    "format": "prettier --write . && .venv/bin/ruff format backend demo infra/bundle_backend.py",
+    "format:check": "prettier --check . && .venv/bin/ruff format --check backend demo infra/bundle_backend.py",
+    "test:backend": "PYTHONPATH=backend .venv/bin/pytest backend/tests -q",
+    "test:frontend": "npm --prefix frontend test",
+    "build": "npm --prefix frontend run build && npm --prefix infra run build"
+  },
+  "devDependencies": {
+    "prettier": "3.8.1"
+  }
+}

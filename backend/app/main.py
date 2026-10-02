@@ -1,0 +1,62 @@
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from app.config import Settings
+from app.providers.interfaces import Providers, ProviderError
+from app.providers.local.extraction import LocalPDFExtractor
+from app.providers.local.jobs import LocalJobDispatcher
+from app.providers.local.privacy import LocalPrivacyFilter, TemplateExplanations
+from app.providers.local.storage import LocalDocumentStorage, SQLiteCaseStorage
+from app.routes.api import router
+from app.services.cases import CaseError, CaseService
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or Settings()
+    settings.validate_mode()
+
+    @asynccontextmanager
+    async def lifespan(app):
+        cases = SQLiteCaseStorage(settings.local_data_dir)
+        cases.interrupt_pending()
+        providers = Providers(
+            LocalPDFExtractor(),
+            LocalPrivacyFilter(),
+            TemplateExplanations(),
+            LocalDocumentStorage(settings.local_data_dir / "uploads"),
+            cases,
+        )
+        service = CaseService(providers)
+        providers.dispatcher = LocalJobDispatcher(service.process)
+        app.state.service = service
+        yield
+        providers.dispatcher.close()
+
+    app = FastAPI(title="ClearPath — synthetic local starter", lifespan=lifespan)
+    app.state.settings = settings
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()
+        ],
+        allow_methods=["GET", "POST", "PUT"],
+        allow_headers=["Content-Type"],
+    )
+
+    @app.exception_handler(CaseError)
+    async def case_error(request: Request, exc: CaseError):
+        return JSONResponse(status_code=exc.status, content={"detail": str(exc)})
+
+    @app.exception_handler(ProviderError)
+    async def provider_error(request: Request, exc: ProviderError):
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "A provider is unavailable. No demo fallback was used."},
+        )
+
+    app.include_router(router, prefix="/api")
+    return app
+
+
+app = create_app()

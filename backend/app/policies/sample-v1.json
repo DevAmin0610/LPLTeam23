@@ -1,0 +1,42 @@
+{
+  "version": "sample-transfer-v1",
+  "disclaimer": "Fictional hackathon rules, not LPL Financial policy or regulatory advice.",
+  "required": {
+    "client_profile": ["Client Name", "SSN", "Address"],
+    "transfer_application": [
+      "Client Name",
+      "SSN",
+      "Address",
+      "Account Number",
+      "Receiving Account"
+    ],
+    "account_statement": ["Client Name", "Address", "Account Number"]
+  },
+  "comparisons": [
+    {
+      "id": "SSN_MATCH",
+      "field": "SSN",
+      "documents": ["client_profile", "transfer_application"],
+      "category": "identifier_mismatch",
+      "severity": "high"
+    },
+    {
+      "id": "ACCOUNT_MATCH",
+      "field": "Account Number",
+      "documents": ["transfer_application", "account_statement"],
+      "category": "identifier_mismatch",
+      "severity": "high"
+    },
+    {
+      "id": "ADDRESS_REVIEW",
+      "field": "Address",
+      "documents": [
+        "client_profile",
+        "transfer_application",
+        "account_statement"
+      ],
+      "category": "address_difference",
+      "severity": "medium"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+local-data/
+*.sqlite*
+node_modules/
+.npm-cache/
+dist/
+*.tsbuildinfo
+cdk.out/
+.DS_Store

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+cdk.out/
+.venv/
+.npm-cache/
+__pycache__/
+*.pyc
+cdk.context.json
