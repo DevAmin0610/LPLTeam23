@@ -21,9 +21,10 @@ class Settings(BaseSettings):
     dynamodb_cases_table: str = ""
     worker_lambda_function_name: str = ""
     # Optional AgentCore Memory (long-term review lessons). Blank disables it;
-    # the namespace must match the semantic strategy configured on the memory.
+    # the namespace must match the semantic strategy's template in infra.
     agentcore_memory_id: str = ""
-    agentcore_memory_namespace: str = "/lessons/{actorId}"
+    agentcore_memory_strategy_id: str = ""
+    agentcore_memory_namespace: str = "/clearpath/lessons/{memoryStrategyId}/{actorId}/"
 
     def validate_mode(self, *, worker: bool = False) -> None:
         if self.app_mode not in {"demo", "aws"}:

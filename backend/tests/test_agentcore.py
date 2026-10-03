@@ -15,6 +15,9 @@ from app.main import create_app
 from app.providers.aws.agentcore import AgentCoreLessons, actor_id
 
 MEMORY_ID = "clearpath-AbCdEfGh12"
+STRATEGY_ID = "ApprovedLessons-AbCdEfGh12"
+# The namespace template the infra stack configures on the semantic strategy.
+NAMESPACE = f"/clearpath/lessons/{STRATEGY_ID}/ADDRESS_REVIEW:formatting_only/"
 LABEL = "Address differs only by abbreviations or punctuation"
 
 
@@ -68,7 +71,10 @@ def test_actor_ids_are_valid_for_agentcore():
 
 def test_requests_match_the_agentcore_api():
     settings = Settings(
-        app_mode="demo", aws_region="us-east-1", agentcore_memory_id=MEMORY_ID
+        app_mode="demo",
+        aws_region="us-east-1",
+        agentcore_memory_id=MEMORY_ID,
+        agentcore_memory_strategy_id=STRATEGY_ID,
     )
     lessons = AgentCoreLessons(settings)
     sdk = boto3.client(
@@ -111,15 +117,15 @@ def test_requests_match_the_agentcore_api():
                         "content": {
                             "text": " Abbreviation-only address differences are usually dismissed. "
                         },
-                        "memoryStrategyId": "semantic-AbCdEfGh12",
-                        "namespaces": ["/lessons/ADDRESS_REVIEW:formatting_only"],
+                        "memoryStrategyId": STRATEGY_ID,
+                        "namespaces": [NAMESPACE],
                         "createdAt": when,
                     }
                 ]
             },
             {
                 "memoryId": MEMORY_ID,
-                "namespace": "/lessons/ADDRESS_REVIEW:formatting_only",
+                "namespace": NAMESPACE,
                 "searchCriteria": {"searchQuery": LABEL, "topK": 3},
             },
         )

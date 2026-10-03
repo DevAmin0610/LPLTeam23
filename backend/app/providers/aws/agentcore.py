@@ -37,11 +37,19 @@ class AgentCoreLessons(_AWSProvider):
         except Exception:
             raise ProviderError("lesson_write_failed") from None
 
+    def namespace(self, pattern: str) -> str:
+        """Resolve the strategy's namespace template for one finding pattern."""
+        template = _setting(self.settings, "agentcore_memory_namespace")
+        if "{memoryStrategyId}" in template:
+            template = template.replace(
+                "{memoryStrategyId}",
+                _setting(self.settings, "agentcore_memory_strategy_id"),
+            )
+        return template.replace("{actorId}", actor_id(pattern))
+
     def search(self, pattern: str, query: str, limit: int = 3) -> list[str]:
         try:
-            namespace = _setting(self.settings, "agentcore_memory_namespace").replace(
-                "{actorId}", actor_id(pattern)
-            )
+            namespace = self.namespace(pattern)
             response = self._client("bedrock-agentcore").retrieve_memory_records(
                 memoryId=_setting(self.settings, "agentcore_memory_id"),
                 namespace=namespace,
