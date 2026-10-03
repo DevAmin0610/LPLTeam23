@@ -67,9 +67,15 @@ class CaseStorage(Protocol):
         self, case_id: str, mutate: Callable[[dict[str, Any]], None]
     ) -> dict[str, Any]: ...
     def interrupt_pending(self) -> None: ...
-    def claim_run(self, case_id: str, run_id: str, owner: str, lease_seconds: int) -> bool: ...
-    def renew_run(self, case_id: str, run_id: str, owner: str, lease_seconds: int) -> bool: ...
-    def finish_run(self, case_id: str, run_id: str, owner: str, result: dict[str, Any]) -> bool: ...
+    def claim_run(
+        self, case_id: str, run_id: str, owner: str, lease_seconds: int
+    ) -> bool: ...
+    def renew_run(
+        self, case_id: str, run_id: str, owner: str, lease_seconds: int
+    ) -> bool: ...
+    def finish_run(
+        self, case_id: str, run_id: str, owner: str, result: dict[str, Any]
+    ) -> bool: ...
 
 
 class JobDispatcher(Protocol):
@@ -88,6 +94,17 @@ class MemoryStore(Protocol):
     def update(self, mutate: Callable[[dict[str, Any]], None]) -> dict[str, Any]: ...
 
 
+class LessonStore(Protocol):
+    """Long-term lesson memory (AgentCore). Advisory text, never authoritative.
+
+    Callers send only privacy-safe text built from pattern labels and decisions.
+    Approval and revocation stay in MemoryStore, which gates what is shown.
+    """
+
+    def add(self, pattern: str, case_id: str, text: str) -> None: ...
+    def search(self, pattern: str, query: str, limit: int = 3) -> list[str]: ...
+
+
 @dataclass
 class Providers:
     extraction: DocumentExtractor
@@ -97,3 +114,4 @@ class Providers:
     cases: CaseStorage
     dispatcher: JobDispatcher | None = field(default=None)
     memory: MemoryStore | None = field(default=None)
+    lessons: LessonStore | None = field(default=None)

@@ -48,6 +48,9 @@ class FindingMemory(BaseModel):
     total: int = 0
     # Set only when past decisions lean clearly one way; never changes the finding.
     hint: str | None = None
+    # Lessons consolidated by AgentCore Memory, shown only while approved
+    # decisions for this pattern exist. Advisory, untrusted text.
+    lessons: list[str] = Field(default_factory=list)
 
 
 class Finding(BaseModel):

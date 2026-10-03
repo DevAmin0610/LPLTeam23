@@ -16,9 +16,26 @@ from app.routes.api import router
 from app.services.cases import CaseError, CaseService
 
 
+def _local_lessons(settings: Settings):
+    """Opt-in only: with AGENTCORE_MEMORY_ID set, lessons use real AgentCore Memory
+    (AWS credentials required). Blank keeps demo mode free of AWS calls."""
+    if not settings.agentcore_memory_id:
+        return None
+    from app.providers.aws.agentcore import AgentCoreLessons
+
+    return AgentCoreLessons(settings)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     settings.validate_mode()
+    if settings.app_mode != "demo":
+        # This server only wires local providers; labeling them "AWS" would be a
+        # silent demo fallback. AWS mode runs through app.handlers.api in Lambda.
+        raise ValueError(
+            "The local server runs APP_MODE=demo only. AWS mode runs in Lambda "
+            "(app.handlers.api); no demo fallback is permitted."
+        )
 
     @asynccontextmanager
     async def lifespan(app):
@@ -31,11 +48,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             documents=LocalDocumentStorage(settings.local_data_dir / "uploads"),
             cases=cases,
             memory=SQLiteMemoryStore(settings.local_data_dir),
+            lessons=_local_lessons(settings),
         )
         service = CaseService(providers)
         providers.dispatcher = LocalJobDispatcher(service.process)
         app.state.service = service
-        yield       
+        yield
         providers.dispatcher.close()
 
     app = FastAPI(title="ClearPath — synthetic local starter", lifespan=lifespan)

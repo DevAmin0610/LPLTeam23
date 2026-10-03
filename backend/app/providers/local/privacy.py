@@ -20,7 +20,8 @@ class LocalPrivacyFilter:
 class TemplateExplanations:
     def explain(self, sanitized_json: str) -> str:
         payload = json.loads(sanitized_json)
-        return (
-            payload["explanation"]
-            + " This is a sample-rule result; advisor review is required."
-        )
+        text = payload["explanation"]
+        lessons = payload.get("approved_lessons")
+        if lessons:
+            text += f" Review memory: {lessons[0]}"
+        return text + " This is a sample-rule result; advisor review is required."

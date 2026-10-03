@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
 from app.providers.interfaces import (
@@ -16,10 +17,28 @@ from app.services.rules import evaluate, finding
 log = logging.getLogger("clearpath")
 ACTIVE = {"queued", "processing"}
 LEASE_SECONDS = 300
+LESSON_CACHE_SECONDS = 30  # Cases are polled; avoid one AgentCore search per poll.
+DEMO_USER = "demo-user"  # The single local user; AWS mode uses the login's user ID.
 
 
 def now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def stale(job: dict) -> bool:
+    """True when an active job's worker crashed or its dispatch was lost.
+
+    AWS has no startup recovery hook, so without this a dead worker would lock
+    the case on "processing" forever. A late worker cannot publish afterwards:
+    finish_run requires the current run ID and lease owner.
+    """
+    if job["status"] == "processing":
+        return job.get("lease_expires_at", 0) < time.time()
+    try:
+        queued_at = datetime.fromisoformat(job["updated_at"])
+    except (KeyError, TypeError, ValueError):
+        return True
+    return (datetime.now(timezone.utc) - queued_at).total_seconds() > LEASE_SECONDS
 
 
 class CaseError(Rejected):
@@ -31,6 +50,7 @@ class CaseError(Rejected):
 class CaseService:
     def __init__(self, providers: Providers):
         self.p = providers
+        self._lesson_cache: dict[str, tuple[float, list[str]]] = {}
 
     def record(self, case_id: str):
         record = self.p.cases.get(case_id)
@@ -40,6 +60,16 @@ class CaseService:
 
     def get(self, case_id: str) -> CaseResponse:
         record = self.record(case_id)
+        job = record["job"]
+        if job and job["status"] in ACTIVE and stale(job):
+            # Shown, not stored: the next analyze request starts a fresh run.
+            job.update(
+                status="interrupted",
+                stage="Analysis stopped",
+                errors=[
+                    "The analysis stopped unexpectedly. No all-clear is available; run the analysis again."
+                ],
+            )
         reviews = record["reviews"]
         record["checklist"] = [
             {
@@ -56,14 +86,26 @@ class CaseService:
                 for f in record["findings"]:
                     if f.get("pattern"):
                         f["memory"] = memory.history(learned, f["pattern"], case_id)
+                        # Only patterns with approved decisions in our own store may
+                        # surface AgentCore lessons, so withdrawn lessons stay hidden.
+                        if f["memory"]["total"]:
+                            f["memory"]["lessons"] = self._lessons(
+                                f["pattern"], f["memory"]["pattern_label"]
+                            )
             except Exception:
                 # Memory is advisory context, not a dependency: the case still loads.
                 log.warning("case=%s category=memory_read_failed", case_id)
         return CaseResponse.model_validate(record)
 
-    def create(self, name: str) -> CaseResponse:
+    def authorize(self, case_id: str, user: str) -> None:
+        """Only the case owner may use it. Others get 404 so IDs reveal nothing."""
+        if self.record(case_id).get("owner", DEMO_USER) != user:
+            raise CaseError("Case not found.", 404)
+
+    def create(self, name: str, owner: str = DEMO_USER) -> CaseResponse:
         record = dict(
             id=str(uuid4()),
+            owner=owner,
             name=name,
             created_at=now(),
             documents=[],
@@ -75,7 +117,9 @@ class CaseService:
         self.p.cases.create(record)
         return self.get(record["id"])
 
-    def register_upload(self, case_id: str, document_type: DocumentType, filename: str) -> dict:
+    def register_upload(
+        self, case_id: str, document_type: DocumentType, filename: str
+    ) -> dict:
         self.record(case_id)
         document_id = str(uuid4())
         key = f"{case_id}/{document_id}.pdf"
@@ -102,8 +146,12 @@ class CaseService:
                 )
             # Replace any prior pending_upload for the same type.
             record["documents"] = [
-                d for d in record["documents"]
-                if not (d["document_type"] == document_type.value and d["status"] == "pending_upload")
+                d
+                for d in record["documents"]
+                if not (
+                    d["document_type"] == document_type.value
+                    and d["status"] == "pending_upload"
+                )
             ]
             record["documents"].append(document)
             record.update(job=None, findings=[], model_input_preview=[])
@@ -114,9 +162,7 @@ class CaseService:
 
     def complete_upload(self, case_id: str, document_id: str) -> dict:
         record = self.record(case_id)
-        doc = next(
-            (d for d in record["documents"] if d["id"] == document_id), None
-        )
+        doc = next((d for d in record["documents"] if d["id"] == document_id), None)
         if not doc:
             raise CaseError("Document not found in this case.", 404)
         if doc["status"] == "uploaded":
@@ -184,7 +230,8 @@ class CaseService:
         run_id = str(uuid4())
 
         def start(record):
-            if record["job"] and record["job"]["status"] in ACTIVE:
+            job = record["job"]
+            if job and job["status"] in ACTIVE and not stale(job):
                 return
             if not record["documents"]:
                 raise CaseError("Upload at least one PDF first.")
@@ -235,18 +282,19 @@ class CaseService:
             reviewed.update(item)
 
         self.p.cases.update(case_id, save)
-        self._remember(case_id, reviewed.get("pattern"), decision)
+        self._remember(case_id, reviewed, decision)
         return decision
 
     # ---- review memory -------------------------------------------------------
 
-    def _remember(self, case_id: str, pattern: str | None, decision: dict) -> None:
+    def _remember(self, case_id: str, finding: dict, decision: dict) -> None:
         """Store an APPROVED lesson, or withdraw it. Never fails the review itself.
 
         Only decisions the reviewer explicitly marks "remember" become lessons
         (see docs/product-direction.md). Saving the same finding again without
         "remember" withdraws this case's lesson. Notes are never stored.
         """
+        pattern = finding.get("pattern")
         if not self.p.memory or not pattern:
             return
         try:
@@ -264,6 +312,52 @@ class CaseService:
                 self.p.memory.update(lambda data: memory.forget(data, pattern, case_id))
         except Exception:
             log.warning("case=%s category=memory_write_failed", case_id)
+            return
+        if decision.get("remember") and self.p.lessons:
+            text = memory.lesson_text(
+                pattern, decision["status"], finding["policy_version"]
+            )
+            try:
+                self.p.lessons.add(pattern, case_id, text)
+                self._lesson_cache.pop(pattern, None)
+            except Exception:
+                log.warning("case=%s category=lesson_write_failed", case_id)
+
+    def _memory_context(
+        self, case_id: str, findings: list[dict]
+    ) -> dict[str, list[str]]:
+        """Approved lessons per pattern from OTHER cases, to inform explanations.
+
+        Read when the analysis runs. A memory failure only means no lessons."""
+        if not self.p.memory:
+            return {}
+        try:
+            learned = self.p.memory.get()
+        except Exception:
+            log.warning("case=%s category=memory_read_failed", case_id)
+            return {}
+        context = {}
+        for pattern in {f["pattern"] for f in findings if f.get("pattern")}:
+            past = memory.history(learned, pattern, case_id)
+            if past["hint"]:
+                lessons = self._lessons(pattern, past["pattern_label"])
+                context[pattern] = [past["hint"], *lessons]
+        return context
+
+    def _lessons(self, pattern: str, query: str) -> list[str]:
+        """AgentCore lessons for a pattern. Advisory: a failure shows none."""
+        if not self.p.lessons:
+            return []
+        cached = self._lesson_cache.get(pattern)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+        try:
+            found = self.p.lessons.search(pattern, query)
+        except Exception:
+            log.warning("category=lesson_read_failed")
+            found = []
+        self._lesson_cache[pattern] = (time.monotonic() + LESSON_CACHE_SECONDS, found)
+        return found
 
     def memory_summary(self) -> dict:
         if not self.p.memory:
@@ -327,8 +421,11 @@ class CaseService:
                 failures.append(
                     "Some fields or documents require manual review; this is not an all-clear."
                 )
-            self._job(case_id, run_id, stage="Sample rules and privacy checks", progress=65)
+            self._job(
+                case_id, run_id, stage="Sample rules and privacy checks", progress=65
+            )
             previews = []
+            context = self._memory_context(case_id, findings)
             for item in findings:
                 payload = {
                     "rule_id": item["rule_id"].split(":")[0],
@@ -337,6 +434,9 @@ class CaseService:
                     "recommended_correction": item["recommended_correction"],
                     "policy_version": item["policy_version"],
                 }
+                if context.get(item.get("pattern")):
+                    # Advisory context for the explanation only; the finding is unchanged.
+                    payload["approved_lessons"] = context[item["pattern"]]
                 try:
                     filtered = self.p.privacy.filter(json.dumps(payload), "INPUT")
                     if (

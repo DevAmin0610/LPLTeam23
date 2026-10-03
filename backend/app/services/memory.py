@@ -16,6 +16,7 @@ from app.services.rules import pattern_label
 
 MAX_CASES_PER_PATTERN = 200
 LEAN = 0.75  # Share of past decisions needed before a hint is shown.
+MIN_FOR_PATTERN = 2  # Fewer past decisions are reported, not called a pattern.
 
 
 def record(
@@ -40,6 +41,16 @@ def forget(data: dict[str, Any], pattern: str, case_id: str) -> None:
         entry["cases"].pop(case_id, None)
 
 
+def lesson_text(pattern: str, status: str, policy_version: str) -> str:
+    """Privacy-safe lesson for AgentCore: fixed labels and the decision only."""
+    verb = "confirmed" if status == "accepted" else "dismissed"
+    return (
+        f"Approved review lesson under policy {policy_version}: a reviewer {verb} "
+        f'the finding "{pattern_label(pattern)}". Reviewers still decide each case; '
+        "this is advisory context for similar findings."
+    )
+
+
 def _counts(
     entry: dict[str, Any] | None, exclude: str | None = None
 ) -> tuple[int, int]:
@@ -59,17 +70,17 @@ def history(data: dict[str, Any], pattern: str, case_id: str) -> dict[str, Any]:
     if total:
         cases = "case" if total == 1 else "cases"
         if dismissed / total >= LEAN:
-            hint = (
-                f"Reviewers dismissed this in {dismissed} of {total} past {cases}. "
-                "Likely a false alarm, but you make the call."
-            )
+            seen = f"Reviewers dismissed this in {dismissed} of {total} past {cases}."
+            verdict = "Likely a false alarm, but you make the call."
         elif accepted / total >= LEAN:
-            hint = (
-                f"Reviewers confirmed this in {accepted} of {total} past {cases}. "
-                "Treat it as a real issue."
-            )
+            seen = f"Reviewers confirmed this in {accepted} of {total} past {cases}."
+            verdict = "Likely a real issue; you make the call."
         else:
-            hint = f"Reviewers have been split on this ({accepted} confirmed, {dismissed} dismissed)."
+            seen = f"Reviewers have been split on this ({accepted} confirmed, {dismissed} dismissed)."
+            verdict = "You make the call."
+        if total < MIN_FOR_PATTERN:
+            verdict = "One review is not a pattern yet; you make the call."
+        hint = f"{seen} {verdict}"
     return dict(
         pattern_label=pattern_label(pattern),
         accepted=accepted,
