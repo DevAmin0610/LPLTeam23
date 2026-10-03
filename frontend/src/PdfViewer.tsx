@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CaseDocument, Evidence } from "./types";
-import { documentUrl } from "./api";
+import { api, errorMessage } from "./api";
 import { documentLabel } from "./types";
 
 interface PdfViewerProps {
@@ -18,15 +18,58 @@ export default function PdfViewer({
 }: PdfViewerProps) {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState("");
 
   const activeDocId = evidence?.document_id ?? documents[0]?.id;
-  const doc = documents.find((d) => d.id === activeDocId) ?? documents[0];
-  const currentPage = evidence?.document_id === doc?.id ? (evidence?.page ?? 1) : page;
+  const doc = documents.find((item) => item.id === activeDocId) ?? documents[0];
+  const docId = doc?.id;
+  const currentPage =
+    evidence?.document_id === docId ? (evidence?.page ?? 1) : page;
 
-  function selectDoc(d: CaseDocument) {
+  useEffect(() => {
+    if (!docId) {
+      setPdfUrl(null);
+      return;
+    }
+    const controller = new AbortController();
+    let active = true;
+    let objectUrl: string | null = null;
+    setLoading(true);
+    setPdfError("");
+    setPdfUrl(null);
+    void api
+      .documentPdf(caseId, docId, controller.signal)
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPdfUrl(objectUrl);
+      })
+      .catch((error: unknown) => {
+        if (
+          active &&
+          !(error instanceof DOMException && error.name === "AbortError")
+        ) {
+          setPdfError(errorMessage(error));
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [caseId, docId]);
+
+  function selectDoc(selected: CaseDocument) {
     setPage(1);
     setLoading(true);
-    onSelectEvidence({ document_id: d.id, page: 1, excerpt: "", bounding_box: null });
+    onSelectEvidence({
+      document_id: selected.id,
+      page: 1,
+      excerpt: "",
+      bounding_box: null,
+    });
   }
 
   function goToPage(next: number) {
@@ -36,7 +79,8 @@ export default function PdfViewer({
       onSelectEvidence({
         document_id: doc.id,
         page: next,
-        excerpt: evidence?.document_id === doc.id ? (evidence?.excerpt ?? "") : "",
+        excerpt:
+          evidence?.document_id === doc.id ? (evidence?.excerpt ?? "") : "",
         bounding_box: null,
       });
   }
@@ -45,37 +89,48 @@ export default function PdfViewer({
     return <div className="empty">Upload a document to view it here.</div>;
   }
 
-  const src = `${documentUrl(caseId, doc.id)}#page=${currentPage}`;
+  const src = pdfUrl ? `${pdfUrl}#page=${currentPage}` : undefined;
 
   return (
     <div className="pdf-viewer">
       <div className="tabs">
-        {documents.map((d) => (
+        {documents.map((item) => (
           <button
-            key={d.id}
-            className={doc.id === d.id ? "selected" : ""}
-            onClick={() => selectDoc(d)}
+            key={item.id}
+            className={doc.id === item.id ? "selected" : ""}
+            onClick={() => selectDoc(item)}
           >
-            {documentLabel(d.document_type)}
+            {documentLabel(item.document_type)}
           </button>
         ))}
       </div>
       <div className="viewer-meta">
-        <span>
-          Original synthetic document · page {currentPage}
-        </span>
-        <a href={documentUrl(caseId, doc.id)} target="_blank" rel="noreferrer">
-          Open PDF ↗
-        </a>
+        <span>Original synthetic document · page {currentPage}</span>
+        {pdfUrl && (
+          <a href={pdfUrl} target="_blank" rel="noreferrer">
+            Open PDF ↗
+          </a>
+        )}
       </div>
       <div className="pdf-frame-wrap">
-        {loading && <div className="pdf-loading" aria-live="polite">Loading…</div>}
-        <iframe
-          key={`${doc.id}:${currentPage}`}
-          title={documentLabel(doc.document_type)}
-          src={src}
-          onLoad={() => setLoading(false)}
-        />
+        {loading && (
+          <div className="pdf-loading" aria-live="polite">
+            Loading…
+          </div>
+        )}
+        {pdfError && (
+          <div role="alert" className="error">
+            {pdfError}
+          </div>
+        )}
+        {src && (
+          <iframe
+            key={`${doc.id}:${currentPage}`}
+            title={documentLabel(doc.document_type)}
+            src={src}
+            onLoad={() => setLoading(false)}
+          />
+        )}
       </div>
       <div className="pdf-controls">
         <button

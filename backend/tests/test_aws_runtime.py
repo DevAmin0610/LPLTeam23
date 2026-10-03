@@ -79,6 +79,26 @@ def test_current_user_reads_the_verified_token_subject():
         current_user(request("aws"))
 
 
+def test_aws_reviewers_cannot_reset_shared_memory():
+    from types import SimpleNamespace
+    from app.routes.api import reset_memory
+    from app.services.cases import CaseError
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                settings=SimpleNamespace(app_mode="aws"),
+                service=SimpleNamespace(
+                    reset_memory=lambda: pytest.fail("must not reset")
+                ),
+            )
+        )
+    )
+    with pytest.raises(CaseError, match="demo mode only") as error:
+        reset_memory(request)
+    assert error.value.status == 403
+
+
 def test_worker_lambda_rejects_bad_events(aws_env):
     worker = importlib.import_module("app.handlers.worker")
     with pytest.raises(ValueError, match="Invalid analysis event"):

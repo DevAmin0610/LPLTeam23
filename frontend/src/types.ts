@@ -1,6 +1,11 @@
 export interface AuthSession {
+  mode: "demo" | "cognito";
   username: string;
+  /** Cognito access token in AWS mode; random local token in demo mode. */
   token: string;
+  id_token?: string;
+  /** Epoch milliseconds; omitted for the local demo session. */
+  expires_at?: number;
   /** ISO timestamp */
   created_at: string;
 }

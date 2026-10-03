@@ -19,7 +19,7 @@ from app.services.cases import CaseError, CaseService
 def _local_lessons(settings: Settings):
     """Opt-in only: with AGENTCORE_MEMORY_ID set, lessons use real AgentCore Memory
     (AWS credentials required). Blank keeps demo mode free of AWS calls."""
-    if not settings.agentcore_memory_id:
+    if not settings.agentcore_memory_id.strip():
         return None
     from app.providers.aws.agentcore import AgentCoreLessons
 

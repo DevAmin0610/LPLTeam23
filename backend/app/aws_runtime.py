@@ -33,7 +33,9 @@ def create_aws_service(
         # The API records approved lessons; the worker reads them so explanations
         # can mention past reviewer decisions (requires read access in both roles).
         memory=DynamoMemoryStore(settings),
-        lessons=AgentCoreLessons(settings) if settings.agentcore_memory_id else None,
+        lessons=(
+            AgentCoreLessons(settings) if settings.agentcore_memory_id.strip() else None
+        ),
     )
 
     return CaseService(providers)

@@ -115,7 +115,7 @@ class CaseService:
             model_input_preview=[],
         )
         self.p.cases.create(record)
-        return self.get(record["id"])
+        return self.get(str(record["id"]))
 
     def register_upload(
         self, case_id: str, document_type: DocumentType, filename: str
@@ -374,12 +374,27 @@ class CaseService:
             self.p.memory.update(lambda data: data.update(patterns={}))
         return self.memory_summary()
 
-    def _job(self, case_id, run_id, **changes):
+    def _job(self, case_id, run_id, *, owner=None, **changes) -> bool:
+        """Update a run, optionally only while the caller owns its active lease."""
+        changed = False
+
         def change(record):
-            if record["job"] and record["job"]["id"] == run_id:
-                record["job"].update(**changes, updated_at=now())
+            nonlocal changed
+            # DynamoDB optimistic-lock retries invoke this callback again. Report
+            # only whether the latest attempt still owns and updates the lease.
+            changed = False
+            job = record["job"]
+            if not job or job["id"] != run_id:
+                return
+            if owner is not None and not (
+                job["status"] == "processing" and job.get("lease_owner") == owner
+            ):
+                return
+            job.update(**changes, updated_at=now())
+            changed = True
 
         self.p.cases.update(case_id, change)
+        return changed
 
     def process(self, case_id: str, run_id: str) -> None:
         owner = str(uuid4())
@@ -390,6 +405,9 @@ class CaseService:
             extracted, failures = {}, []
             findings = []
             for doc in record["documents"]:
+                if not self.p.cases.renew_run(case_id, run_id, owner, LEASE_SECONDS):
+                    log.warning("case=%s category=lease_lost", case_id)
+                    return
                 try:
                     extracted[doc["id"]] = self.p.extraction.extract(
                         self.p.documents.get(doc["storage_key"])
@@ -421,12 +439,21 @@ class CaseService:
                 failures.append(
                     "Some fields or documents require manual review; this is not an all-clear."
                 )
-            self._job(
-                case_id, run_id, stage="Sample rules and privacy checks", progress=65
-            )
+            if not self._job(
+                case_id,
+                run_id,
+                owner=owner,
+                stage="Sample rules and privacy checks",
+                progress=65,
+            ):
+                log.warning("case=%s category=lease_lost", case_id)
+                return
             previews = []
             context = self._memory_context(case_id, findings)
             for item in findings:
+                if not self.p.cases.renew_run(case_id, run_id, owner, LEASE_SECONDS):
+                    log.warning("case=%s category=lease_lost", case_id)
+                    return
                 payload = {
                     "rule_id": item["rule_id"].split(":")[0],
                     "comparison_result": item["category"],
@@ -468,13 +495,16 @@ class CaseService:
                 return
             log.info("case=%s status=%s", case_id, result["status"])
         except Exception:
-            self._job(
+            if self._job(
                 case_id,
                 run_id,
+                owner=owner,
                 status="failed",
                 stage="Analysis failed",
                 errors=[
                     "Analysis failed. No all-clear is available; review manually or retry."
                 ],
-            )
-            log.warning("case=%s category=analysis_failed", case_id)
+            ):
+                log.warning("case=%s category=analysis_failed", case_id)
+            else:
+                log.warning("case=%s category=failure_lost_ownership", case_id)

@@ -41,6 +41,8 @@ export interface ClearPathConfig {
   authDomainPrefix?: string;
   permissionsBoundaryArn?: string;
   existingMemoryId?: string;
+  /** Generated semantic strategy ID. Supplying it enables Lambda ingestion/retrieval. */
+  agentcoreMemoryStrategyId?: string;
   enableSemanticMemory: boolean;
   memoryProcessingRegionConfirmed: boolean;
   memoryEventExpiryDays: number;
@@ -93,18 +95,30 @@ export function readConfig(app: App): ClearPathConfig {
   if (guardrailVersion && !/^[1-9][0-9]*$/.test(guardrailVersion)) {
     throw new Error("Use a published numeric guardrailVersion, not DRAFT.");
   }
+  const agentcoreMemoryStrategyId = optional(app, "agentcoreMemoryStrategyId");
+  if (
+    agentcoreMemoryStrategyId &&
+    !/^[a-zA-Z][a-zA-Z0-9_-]{0,99}-[a-zA-Z0-9]{10}$/.test(
+      agentcoreMemoryStrategyId,
+    )
+  ) {
+    throw new Error(
+      "agentcoreMemoryStrategyId must be a semantic strategy ID.",
+    );
+  }
   const frontendOrigins = stringList(app, "frontendOrigins", [
     "http://localhost:5173",
   ]);
   for (const origin of frontendOrigins) {
     const url = new URL(origin);
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
     if (
-      !["http:", "https:"].includes(url.protocol) ||
+      (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
       url.origin !== origin ||
       origin.includes("*")
     ) {
       throw new Error(
-        "frontendOrigins must contain exact HTTP(S) origins without trailing slashes.",
+        "frontendOrigins must contain exact HTTPS origins (or loopback HTTP origins) without trailing slashes.",
       );
     }
   }
@@ -133,6 +147,7 @@ export function readConfig(app: App): ClearPathConfig {
     authDomainPrefix: optional(app, "authDomainPrefix"),
     permissionsBoundaryArn: optional(app, "permissionsBoundaryArn"),
     existingMemoryId: optional(app, "existingMemoryId"),
+    agentcoreMemoryStrategyId,
     enableSemanticMemory: flag(app, "enableSemanticMemory", true),
     memoryProcessingRegionConfirmed: flag(
       app,
@@ -154,6 +169,14 @@ export class ClearPathStack extends Stack {
     const config = props.config;
     if (this.region !== "us-east-1" && this.region !== Aws.REGION) {
       throw new Error("ClearPath AWS deployment is restricted to us-east-1.");
+    }
+    if (
+      config.agentcoreMemoryStrategyId &&
+      (!config.enableSemanticMemory || !config.memoryProcessingRegionConfirmed)
+    ) {
+      throw new Error(
+        "AgentCore runtime integration requires enabled, region-confirmed semantic Memory.",
+      );
     }
 
     const permissionsBoundary = config.permissionsBoundaryArn
@@ -426,6 +449,14 @@ export class ClearPathStack extends Stack {
       eventExpiryDays: config.memoryEventExpiryDays,
       permissionsBoundary,
     });
+    if (config.agentcoreMemoryStrategyId) {
+      environment.AGENTCORE_MEMORY_ID = memory.memoryId;
+      environment.AGENTCORE_MEMORY_STRATEGY_ID =
+        config.agentcoreMemoryStrategyId;
+      memory.grantIngestion(apiRole);
+      memory.grantRetrieval(apiRole);
+      memory.grantRetrieval(workerRole);
+    }
 
     const failedJobs = new sqs.Queue(this, "FailedJobs", {
       encryption: sqs.QueueEncryption.SQS_MANAGED,
@@ -510,12 +541,13 @@ export class ClearPathStack extends Stack {
       `https://cognito-idp.${this.region}.${this.urlSuffix}/${userPool.userPoolId}`,
       { jwtAudience: [userPoolClient.userPoolClientId] },
     );
+    const apiIntegration = new integrations.HttpLambdaIntegration(
+      "ApiIntegration",
+      api,
+    );
     const httpApi = new apigw.HttpApi(this, "HttpApi", {
       apiName: `${this.stackName}-http`,
-      defaultIntegration: new integrations.HttpLambdaIntegration(
-        "ApiIntegration",
-        api,
-      ),
+      defaultIntegration: apiIntegration,
       defaultAuthorizer: jwtAuthorizer,
       defaultAuthorizationScopes: ["clearpath/review"],
       corsPreflight: frontendOrigins.length
@@ -538,6 +570,16 @@ export class ClearPathStack extends Stack {
           }
         : undefined,
     });
+    // A JWT-protected $default route also catches browser preflight requests.
+    // Route OPTIONS explicitly without auth so API Gateway can complete CORS;
+    // all application methods continue through the protected default route.
+    httpApi.addRoutes({
+      path: "/{proxy+}",
+      methods: [apigw.HttpMethod.OPTIONS],
+      integration: apiIntegration,
+      authorizer: new apigw.HttpNoneAuthorizer(),
+      authorizationScopes: [],
+    });
     const stage = httpApi.defaultStage!.node.defaultChild as apigw.CfnStage;
     stage.defaultRouteSettings = {
       throttlingBurstLimit: 20,
@@ -559,5 +601,10 @@ export class ClearPathStack extends Stack {
     new CfnOutput(this, "AuthScope", { value: "clearpath/review" });
     new CfnOutput(this, "AgentCoreMemoryId", { value: memory.memoryId });
     new CfnOutput(this, "AgentCoreMemoryArn", { value: memory.memoryArn });
+    if (config.agentcoreMemoryStrategyId) {
+      new CfnOutput(this, "AgentCoreMemoryStrategyId", {
+        value: config.agentcoreMemoryStrategyId,
+      });
+    }
   }
 }

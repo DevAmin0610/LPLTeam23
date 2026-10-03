@@ -21,16 +21,17 @@ header {
   border-bottom: 1px solid #dfe7e3;
 }
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  display: block;
+  width: 76px;
+  aspect-ratio: 1.31;
+  overflow: hidden;
   text-decoration: none;
-  font-size: 27px;
-  font-weight: 750;
-  color: #245e53;
 }
-.brand span {
-  color: #203c38;
+.brand-logo {
+  display: block;
+  width: 132%;
+  height: auto;
+  transform: translate(-12%, -23%);
 }
 .pill {
   font-size: 10px;
@@ -88,6 +89,12 @@ main {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 48px;
+}
+.setup.setup-single {
+  grid-template-columns: 1fr;
+}
+.setup-single form {
+  max-width: 680px;
 }
 .setup > div {
   border-right: 1px solid #e3e9e5;
@@ -174,6 +181,16 @@ small,
   font-size: 11px;
   margin-top: 18px;
 }
+.download-link {
+  appearance: none;
+  background: none;
+  border: 0;
+  color: #27645a;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
 .case-bar {
   display: flex;
   justify-content: space-between;
@@ -194,8 +211,31 @@ small,
   min-width: 180px;
   margin: 0;
 }
+.upload select,
+.upload input[type="file"],
 .upload button {
-  margin-bottom: 1px;
+  height: 44px;
+}
+.upload input[type="file"] {
+  padding: 6px;
+}
+.upload input[type="file"]::file-selector-button {
+  height: 42px;
+  margin: -6px 10px -6px -6px;
+  padding: 0 12px;
+  border: 0;
+  border-right: 1px solid #cbd8d1;
+  background: #f4f7f5;
+  color: #244c42;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.upload button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0;
 }
 .progress > div {
   display: flex;
@@ -212,7 +252,7 @@ progress {
   display: grid;
   grid-template-columns: 1.08fr 1fr;
   gap: 20px;
-  align-items: start;
+  align-items: stretch;
 }
 .review-grid .panel {
   margin-top: 0;
@@ -512,17 +552,21 @@ footer {
   box-shadow: 0 6px 24px #213d3808;
 }
 .login-brand {
-  font-size: 27px;
-  font-weight: 750;
-  color: #245e53;
-  margin-bottom: 4px;
+  width: min(220px, 100%);
+  aspect-ratio: 1.31;
+  overflow: hidden;
+  margin: 0 auto 8px;
 }
-.login-brand span {
-  color: #203c38;
+.login-logo {
+  display: block;
+  width: 132%;
+  height: auto;
+  transform: translate(-12%, -23%);
 }
 .login-subtitle {
   font-size: 12px;
   color: #617570;
+  text-align: center;
   margin: 0 0 24px;
 }
 .login-form label {

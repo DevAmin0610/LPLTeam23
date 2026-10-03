@@ -20,9 +20,18 @@ function PatternBar({
   const acceptedPct = Math.round((accepted / total) * 100);
   const dismissedPct = Math.round((dismissed / total) * 100);
   return (
-    <div className="memory-bar" aria-label={`${acceptedPct}% accepted, ${dismissedPct}% dismissed`}>
-      <div className="memory-bar-accepted" style={{ width: `${acceptedPct}%` }} />
-      <div className="memory-bar-dismissed" style={{ width: `${dismissedPct}%` }} />
+    <div
+      className="memory-bar"
+      aria-label={`${acceptedPct}% accepted, ${dismissedPct}% dismissed`}
+    >
+      <div
+        className="memory-bar-accepted"
+        style={{ width: `${acceptedPct}%` }}
+      />
+      <div
+        className="memory-bar-dismissed"
+        style={{ width: `${dismissedPct}%` }}
+      />
     </div>
   );
 }
@@ -79,7 +88,9 @@ export default function MemoryPanel({
                   <span className="learned-counts">
                     <span className="stat-accepted">{p.accepted} accepted</span>
                     {" · "}
-                    <span className="stat-dismissed">{p.dismissed} dismissed</span>
+                    <span className="stat-dismissed">
+                      {p.dismissed} dismissed
+                    </span>
                   </span>
                   <span className="memory-total">{p.total} total</span>
                 </div>

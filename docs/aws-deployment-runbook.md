@@ -1,12 +1,21 @@
 # AWS deployment runbook
 
-This runbook prepares an authorized hackathon deployment; it is not authorization to create resources. Commands below are examples and have **not** been run against AWS.
+The `ClearPath` stack is deployed in account `033890317696`, `us-east-1`, with CloudFormation status `UPDATE_COMPLETE`, and the frontend is published at https://d5ztmc348hleb.cloudfront.net. This runbook is the controlled procedure for future authorized updates and republication; commands must not be rerun blindly or treated as authorization.
 
 ClearPath is an independent synthetic-data prototype, not official LPL policy, an LPL-endorsed product, or a regulatory compliance guarantee.
 
-## 1. Release gates
+## 1. Deployment status and gates for future updates
 
-Do not deploy until all boxes are satisfied:
+Verified in the current deployment:
+
+- [x] CloudFormation stack deployment completed in account `033890317696`, `us-east-1`.
+- [x] Frontend published through private S3 and CloudFront with HTTP redirected to HTTPS.
+- [x] Invite-only Cognito authorization code + PKCE sign-in completed successfully.
+- [x] JWT-protected frontend/API connectivity and CORS preflight handling verified.
+- [x] API request without an access token returns `401`.
+- [x] AgentCore Memory resource provisioned; runtime strategy ID and Lambda data-plane access remain disabled.
+
+Before any future deployment or runtime activation:
 
 - [ ] Organizers authorize CDK bootstrap (if needed), CloudFormation deployment, IAM role creation, Cognito, CloudFront, S3, DynamoDB, Lambda, SQS, Textract, Bedrock Guardrails/model invocation, and AgentCore Memory.
 - [ ] Account ID and target region are confirmed; this stack supports only `us-east-1`.
@@ -16,12 +25,12 @@ Do not deploy until all boxes are satisfied:
 - [ ] Guardrail creation is allowed, or an existing guardrail ID and published numeric version are supplied.
 - [ ] AgentCore Memory availability, quota, cost, retention, and built-in semantic processing regions are approved. The confirmation flag does not pin processing to one region.
 - [ ] Only synthetic documents and fictional policies will be used.
-- [ ] Frontend OAuth authorization-code + PKCE support is implemented and tested.
-- [ ] Backend ownership/access enforcement is implemented and tested. Cognito authentication alone is insufficient.
+- [x] Frontend OAuth authorization-code + PKCE and backend ownership enforcement are implemented and covered by offline tests.
+- [ ] Logout, token expiry, missing-scope behavior, and two-user ownership are live-validated in the deployed environment.
 - [ ] AgentCore ingestion/retrieval is implemented only for sanitized, structured, explicitly approved lessons, or the demo is labeled “Memory provisioned, integration pending.”
 - [ ] Privacy failures stop model/Memory invocation; AWS failures do not fall back to demo findings.
 
-The final three application gates are currently open in this repository. Do not expose the deployment to multiple users or claim live AgentCore learning until they are closed.
+Basic browser sign-in and protected API connectivity are validated. Complete authentication/authorization behavior, the upload/analyze/review workflow, shared-memory isolation, and lesson provenance/revocation remain open. Keep the hosted application invite-only and synthetic, and do not claim active AgentCore learning or a validated end-to-end AWS workflow.
 
 ## 2. Validate without AWS calls
 
@@ -53,12 +62,15 @@ npm --prefix infra run synth:local -- \
 
 Omit `additionalModelArns` or `permissionsBoundaryArn` only when organizers confirm they are unnecessary. To import resources, add the relevant `existingBucketName`, `existingTableName`, `guardrailId` plus `guardrailVersion`, or `existingMemoryId` context.
 
+Memory provisioning and runtime activation are deliberately separate. Without `agentcoreMemoryStrategyId`, the stack can provision semantic Memory but gives neither Lambda AgentCore data-plane access. After an authorized operator obtains the concrete strategy ID from the provisioned or imported Memory, synthesize and review a second change with `-c agentcoreMemoryStrategyId=APPROVED_STRATEGY_ID`. That change injects the Memory/strategy IDs, grants the API ingestion and retrieval, and grants the worker retrieval. Never guess the generated strategy ID.
+
 Review `infra/cdk.out/ClearPath.template.json` and the asset manifest. Check especially:
 
 - no wildcard Bedrock model/guardrail resources;
 - Textract’s unavoidable `*` resource is action-limited to `DetectDocumentText`;
 - Lambda roles have only required S3, DynamoDB, Lambda, Bedrock, Textract and log permissions;
-- no Lambda has AgentCore ingestion/retrieval permissions before the safe application workflow exists;
+- no Lambda has AgentCore ingestion/retrieval permissions unless `agentcoreMemoryStrategyId` was explicitly supplied;
+- when runtime Memory is enabled, the API has ingestion/retrieval, the worker has retrieval, and neither role has deletion;
 - all stateful resources are retained and the account cleanup owner understands the consequence;
 - the document and website buckets block public access;
 - API Gateway’s default route requires JWT plus `clearpath/review` scope;
@@ -78,7 +90,7 @@ aws configure get region --profile WORKSHOP_PROFILE
 
 Stop if the account or region differs from the reviewed synth.
 
-## 4. Bootstrap and deploy (authorized operator only)
+## 4. Bootstrap or deploy an authorized update
 
 CDK bootstrap creates account-level resources and IAM roles. Skip it if organizers provide an approved existing bootstrap environment. Otherwise, run it only with explicit permission and the workshop-required boundary/qualifier settings.
 
@@ -99,20 +111,27 @@ npm --prefix infra exec cdk deploy -- \
 
 Do not use `--require-approval never`. Inspect the CloudFormation change set before confirmation. Record outputs without committing them.
 
-## 5. Create the first invited reviewer
+## 5. Create an invited reviewer
 
 Creating users changes the AWS account and should be done by an authorized operator after deployment. Use the Cognito console or the approved `admin-create-user` process against the `UserPoolId` output. Do not create shared credentials or commit temporary passwords.
 
 The user must set a permanent password at first login. Software-token MFA is available but optional in the hackathon stack; use the workshop’s required policy if it is stricter.
 
-## 6. Publish the website last
+## 6. Build or republish the website
 
-Do this only after API/auth outputs exist and the frontend supports Cognito OAuth/PKCE.
+The current website is https://d5ztmc348hleb.cloudfront.net. Build or republish only after the API, `AuthDomain`, `UserPoolClientId`, `WebsiteUrl`, website bucket, and distribution outputs exist and match the reviewed deployment.
 
-Build-time public settings may include the API URL, Cognito domain, user-pool/client IDs, callback URL, and scope. They are identifiers, not secrets. Never embed AWS credentials or a Cognito client secret.
+Build-time public settings may include the API URL, Cognito domain, client ID, callback URL and scope. They are identifiers, not secrets. Never embed AWS credentials or a Cognito client secret. The redirect URI must exactly match the `WebsiteUrl` registered by CDK.
 
 ```sh
+VITE_AUTH_MODE=cognito \
+VITE_API_BASE_URL=API_URL \
+VITE_COGNITO_DOMAIN=AUTH_DOMAIN \
+VITE_COGNITO_CLIENT_ID=USER_POOL_CLIENT_ID \
+VITE_COGNITO_REDIRECT_URI=WEBSITE_URL \
+VITE_COGNITO_SCOPE="openid email clearpath/review" \
 npm --prefix frontend run build
+
 aws s3 sync frontend/dist/ s3://WEBSITE_BUCKET_NAME --delete --profile WORKSHOP_PROFILE --region us-east-1
 aws cloudfront create-invalidation --distribution-id WEBSITE_DISTRIBUTION_ID --paths "/index.html" --profile WORKSHOP_PROFILE
 ```
@@ -123,16 +142,16 @@ CloudFront is intentionally static-only. The frontend calls the API Gateway URL 
 
 Use synthetic data only.
 
-1. Open the `WebsiteUrl` output over HTTPS. Confirm HTTP redirects to HTTPS.
-2. Sign in as the invited user using authorization code + PKCE; verify logout and token expiry behavior.
-3. Confirm an API call without an access token returns `401` and one without `clearpath/review` is denied.
-4. Create and retrieve a synthetic case. Until server-side ownership is implemented, do not test with multiple users or expose the URL publicly.
+1. **Verified:** open the `WebsiteUrl` output over HTTPS; HTTP redirects to HTTPS.
+2. **Partially verified:** invited-user authorization code + PKCE sign-in and authenticated API connectivity work. Logout and token-expiry behavior remain to be validated.
+3. **Partially verified:** an API call without an access token returns `401`. A token without `clearpath/review` still needs explicit denial testing.
+4. Create and retrieve a synthetic case, then verify a second invited user receives `404` for that case on every protected case route.
 5. Upload a small supported synthetic PDF through the presigned flow; reject wrong content type, oversize content, and a key not issued by the API.
 6. Analyze a sample and confirm Textract/Guardrails/model failures surface as failures, never demo results.
 7. Confirm no raw document text, identifiers, authorization headers, or full Guardrails payloads appear in CloudWatch logs.
 8. Confirm the SQS failed-job destination receives terminal asynchronous failures during an intentional synthetic failure test.
-9. Verify the AgentCore Memory resource and semantic strategy exist. Until backend integration is implemented, explicitly show that no Lambda role can call `CreateEvent` or `RetrieveMemoryRecords` and describe Memory as provisioned—not learning.
-10. After safe integration exists, demonstrate one approved sanitized synthetic lesson influencing only a later explanation/next step while the underlying deterministic finding remains unchanged. Also test irrelevant, conflicting, revoked, privacy-blocked, and unavailable-Memory cases.
+9. **Verified provisioning state:** the AgentCore Memory resource and built-in semantic strategy exist. `agentcoreMemoryStrategyId` is not configured, Lambda has no `CreateEvent` or `RetrieveMemoryRecords` access, and Memory must be described as provisioned—not active.
+10. After separately reviewing and deploying runtime activation, demonstrate one approved sanitized synthetic lesson influencing only a later explanation/next step while the underlying deterministic finding remains unchanged. Also test irrelevant, conflicting, privacy-blocked and unavailable-Memory cases. Revocation is not complete, so keep the proof of concept single-user and synthetic.
 
 ## 8. Rollback and cleanup
 
