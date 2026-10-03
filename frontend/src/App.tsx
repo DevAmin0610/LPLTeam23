@@ -1,16 +1,36 @@
 import { useState } from "react";
-import { apiUrl, documentUrl, safePreview, validatePdf } from "./api";
+import { apiUrl, safePreview, validatePdf } from "./api";
+import { getSession, logout } from "./auth";
 import { DOCUMENT_TYPES, categoryLabel, documentLabel } from "./types";
 import type {
+  AuthSession,
   DocumentType,
   Evidence,
   FindingMemory,
-  MemorySummary,
 } from "./types";
 import { useWorkspace } from "./useWorkspace";
+import LoginScreen from "./LoginScreen";
+import PdfViewer from "./PdfViewer";
+import MemoryPanel from "./MemoryPanel";
 import "./style.css";
 
 export default function App() {
+  const [session, setSession] = useState<AuthSession | null>(getSession);
+
+  if (!session) {
+    return <LoginScreen onLogin={setSession} />;
+  }
+
+  return <Workspace session={session} onLogout={() => setSession(null)} />;
+}
+
+function Workspace({
+  session,
+  onLogout,
+}: {
+  session: AuthSession;
+  onLogout: () => void;
+}) {
   const w = useWorkspace();
   const [sample, setSample] = useState("conflicting");
   const [name, setName] = useState("Synthetic transfer review");
@@ -22,17 +42,26 @@ export default function App() {
   const [remember, setRemember] = useState<Record<string, boolean>>({});
   const c = w.currentCase;
   const busy = !!w.busy || w.restoring;
-  const doc =
-    c?.documents.find((d) => d.id === selected?.document_id) ?? c?.documents[0];
-  const evidence = doc?.id === selected?.document_id ? selected : null;
   const packet = w.samples.find((s) => s.id === sample);
+
+  function handleLogout() {
+    logout();
+    onLogout();
+  }
+
   return (
     <>
       <header>
         <a className="brand" href="/">
           C<span>ClearPath</span>
         </a>
-        <span className="pill">HACKATHON STARTER</span>
+        <div className="header-right">
+          <span className="pill">HACKATHON STARTER</span>
+          <span className="session-user">{session.username}</span>
+          <button className="logout-btn" onClick={handleLogout}>
+            Sign out
+          </button>
+        </div>
       </header>
       <div className="banner">
         {w.config?.banner ?? "Connecting to the local API…"}
@@ -209,59 +238,12 @@ export default function App() {
             <div className="review-grid">
               <section className="panel viewer">
                 <h2>02 · Source documents</h2>
-                <div className="tabs">
-                  {c.documents.map((d) => (
-                    <button
-                      key={d.id}
-                      className={doc?.id === d.id ? "selected" : ""}
-                      onClick={() =>
-                        setSelected({
-                          document_id: d.id,
-                          page: 1,
-                          excerpt: "",
-                          bounding_box: null,
-                        })
-                      }
-                    >
-                      {documentLabel(d.document_type)}
-                    </button>
-                  ))}
-                </div>
-                {doc ? (
-                  <>
-                    <div className="viewer-meta">
-                      <span>
-                        Original synthetic document · page {evidence?.page ?? 1}
-                      </span>
-                      <a
-                        href={documentUrl(c.id, doc.id)}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Open PDF ↗
-                      </a>
-                    </div>
-                    <iframe
-                      key={`${doc.id}:${evidence?.page ?? 1}`}
-                      title={documentLabel(doc.document_type)}
-                      src={`${documentUrl(c.id, doc.id)}#page=${evidence?.page ?? 1}`}
-                    />
-                    {evidence?.excerpt && (
-                      <div className="excerpt">
-                        <strong>Sanitized source reference</strong>
-                        <p>{evidence.excerpt}</p>
-                        <small>
-                          Page navigation only. Local extraction does not
-                          provide reliable bounding boxes.
-                        </small>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="empty">
-                    Upload a document to view it here.
-                  </div>
-                )}
+                <PdfViewer
+                  caseId={c.id}
+                  documents={c.documents}
+                  evidence={selected}
+                  onSelectEvidence={setSelected}
+                />
               </section>
               <section className="panel findings">
                 <h2>
@@ -382,7 +364,7 @@ export default function App() {
                 })}
               </section>
             </div>
-            <LearnedPanel
+            <MemoryPanel
               summary={w.learned}
               busy={busy}
               onReset={() => void w.resetMemory()}
@@ -455,8 +437,6 @@ function lean(m: { accepted: number; dismissed: number; total: number }) {
   return "split";
 }
 
-// Past reviewer decisions on this kind of finding. Advisory: it never changes
-// the finding, its severity or its place in the checklist.
 function MemoryNote({ memory }: { memory: FindingMemory }) {
   const kind = lean(memory);
   return (
@@ -470,58 +450,5 @@ function MemoryNote({ memory }: { memory: FindingMemory }) {
         </small>
       )}
     </div>
-  );
-}
-
-function LearnedPanel({
-  summary,
-  busy,
-  onReset,
-}: {
-  summary: MemorySummary | null;
-  busy: boolean;
-  onReset: () => void;
-}) {
-  if (!summary?.enabled) return null;
-  return (
-    <section className="panel learned" aria-live="polite">
-      <div className="learned-head">
-        <div>
-          <h2>
-            What ClearPath has learned{" "}
-            <span className="count">{summary.total_decisions}</span>
-          </h2>
-          <p className="muted">
-            Decisions reviewers chose to remember, grouped by kind of finding.
-            Patterns and counts only: no names, identifiers or notes. Advisory:
-            it never changes a finding, and you still make every call.
-          </p>
-        </div>
-        <button
-          disabled={busy || !summary.total_decisions}
-          onClick={onReset}
-          title="Clear remembered decisions (for rehearsals)"
-        >
-          Reset memory
-        </button>
-      </div>
-      {summary.patterns.length ? (
-        <ul className="learned-list">
-          {summary.patterns.map((p) => (
-            <li key={p.pattern} className={`memory-${lean(p)}`}>
-              <span>{p.label}</span>
-              <span className="learned-counts">
-                {p.dismissed} dismissed · {p.accepted} confirmed
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p>
-          Nothing yet. Tick “Remember this decision” when you accept or dismiss
-          a finding.
-        </p>
-      )}
-    </section>
   );
 }
