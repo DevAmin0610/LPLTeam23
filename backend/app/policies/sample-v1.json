@@ -1,5 +1,5 @@
 {
-  "version": "sample-transfer-v1",
+  "version": "sample-transfer-v2",
   "disclaimer": "Fictional hackathon rules, not LPL Financial policy or regulatory advice.",
   "required": {
     "client_profile": ["Client Name", "SSN", "Address"],
@@ -7,8 +7,10 @@
       "Client Name",
       "SSN",
       "Address",
-      "Account Number",
-      "Receiving Account"
+      "Receiving Account",
+      "Date of Birth",
+      "Signature Date",
+      "Account Type"
     ],
     "account_statement": ["Client Name", "Address", "Account Number"]
   },
@@ -16,7 +18,10 @@
     "client_profile": {
       "Client Name": ["Client Name", "Customer Name", "Account Holder"],
       "SSN": ["SSN", "Social Security Number"],
-      "Address": ["Address", "Mailing Address", "Residential Address"]
+      "Address": ["Address", "Mailing Address", "Residential Address"],
+      "Account Type": ["Account Type", "Registration Type"],
+      "Date of Birth": ["Date of Birth", "DOB", "Birth Date"],
+      "Account Number": ["Account Number", "Account No", "Acct Number"]
     },
     "transfer_application": {
       "Client Name": ["Client Name", "Customer Name", "Account Holder"],
@@ -34,7 +39,10 @@
         "Receiving Account",
         "Receiving Account Number",
         "Destination Account Number"
-      ]
+      ],
+      "Account Type": ["Account Type", "Registration Type"],
+      "Date of Birth": ["Date of Birth", "DOB", "Birth Date"],
+      "Signature Date": ["Signature Date", "Date Signed"]
     },
     "account_statement": {
       "Client Name": [
@@ -49,7 +57,8 @@
         "Account No",
         "Acct Number",
         "Acct No"
-      ]
+      ],
+      "Account Type": ["Account Type", "Registration Type"]
     }
   },
   "comparisons": [
@@ -77,6 +86,22 @@
       ],
       "category": "address_difference",
       "severity": "medium"
+    },
+    {
+      "id": "ACCOUNT_TYPE_MATCH",
+      "field": "Account Type",
+      "documents": [
+        "client_profile",
+        "transfer_application",
+        "account_statement"
+      ],
+      "category": "review_required",
+      "severity": "high"
     }
-  ]
+  ],
+  "optional": {
+    "transfer_application": ["Account Number"],
+    "client_profile": ["Date of Birth", "Account Number", "Account Type"],
+    "account_statement": ["Account Type"]
+  }
 }

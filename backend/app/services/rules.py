@@ -34,7 +34,8 @@ _STREET_WORDS = {
     "hwy": "highway",
     "pkwy": "parkway",
     "cir": "circle",
-    "apt": "apartment",
+    "apt": "unit",
+    "apartment": "unit",
     "ste": "suite",
     "n": "north",
     "s": "south",
@@ -56,6 +57,7 @@ PATTERN_LABELS = {
     "ACCOUNT_MATCH:different": "Account number is a different account",
     "EXTRACTION": "Document could not be read",
     "LAYOUT": "Document layout not recognized",
+    "ACCOUNT_TYPE_MATCH": "Account registration type differs between documents",
 }
 
 
@@ -81,7 +83,9 @@ def _label_key(value: str) -> str:
 def _field_aliases(document_type: str) -> dict[str, str]:
     aliases = {}
     configured = POLICY.get("aliases", {}).get(document_type, {})
-    for canonical in POLICY["required"][document_type]:
+    for canonical in POLICY["required"][document_type] + POLICY.get("optional", {}).get(
+        document_type, []
+    ):
         for alias in configured.get(canonical, [canonical]):
             key = _label_key(alias)
             previous = aliases.get(key)
@@ -273,7 +277,9 @@ def evaluate(
             )
             continue
         parsed[doc["document_type"]] = (doc, fields, uncertain, boxes)
-        for key in required:
+        for key in dict.fromkeys(
+            required + POLICY.get("optional", {}).get(doc["document_type"], [])
+        ):
             value = fields.get(key, "")
             if (
                 value
@@ -309,7 +315,7 @@ def evaluate(
                         evidence,
                     )
                 )
-            elif not value:
+            elif not value and key in required:
                 findings.append(
                     finding(
                         case_id,
@@ -346,6 +352,8 @@ def evaluate(
             re.sub(r"\s+", " ", fields[key]).strip().casefold()
             for _, fields, _ in candidates
         ]
+        if key == "Account Type":
+            values = [_label_key(value) for value in values]
         if key == "SSN":
             values = [value.replace("-", "") for value in values]
         if len(set(values)) > 1:
@@ -373,7 +381,7 @@ def evaluate(
                     explanation,
                     f"Confirm the correct {key if key.isupper() else key.lower()} with the client and reconcile the packet.",
                     evidence,
-                    rule["severity"],
+                    "low" if pattern.endswith(":formatting_only") else rule["severity"],
                     pattern,
                 )
             )

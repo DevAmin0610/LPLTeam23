@@ -52,6 +52,9 @@ def generate():
                 fields["Account Number"] = "DEMO-10001234"
             if kind == "transfer_application":
                 fields["Receiving Account"] = "RECV-50005678"
+                fields["Date of Birth"] = "1991-11-27"
+                fields["Signature Date"] = "2026-08-31"
+                fields["Account Type"] = "Roth IRA"
                 if packet == "missing":
                     fields["Receiving Account"] = ""
                     fields["Address"] = ""

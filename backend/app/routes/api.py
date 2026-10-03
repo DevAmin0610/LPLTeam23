@@ -96,7 +96,7 @@ def get_case(case_id: UUID, request: Request):
 )
 def request_upload(case_id: UUID, body: UploadRequest, request: Request):
     result = request.app.state.service.register_upload(
-        str(case_id), body.document_type, body.filename
+        str(case_id), body.document_type, body.filename, replace=body.replace
     )
     return result
 
@@ -121,6 +121,7 @@ async def upload_document(
     request: Request,
     document_type: DocumentType = Form(...),
     file: UploadFile = File(...),
+    replace: bool = Form(False),
 ):
     try:
         content = await file.read(MAX_UPLOAD + 1)
@@ -130,7 +131,7 @@ async def upload_document(
     from starlette.concurrency import run_in_threadpool
 
     return await run_in_threadpool(
-        request.app.state.service.upload, str(case_id), document_type, content
+        request.app.state.service.upload, str(case_id), document_type, content, replace
     )
 
 

@@ -77,3 +77,72 @@ describe("frontend boundaries", () => {
     ).toEqual({ result: "mismatch", nested: {} });
   });
 });
+
+it("sends explicit replacement intent through the AWS presign and completion flow", async () => {
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          document_id: "replacement-id",
+          url: "https://s3.example.test/upload",
+          fields: { key: "new-key" },
+          expires_in: 300,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    )
+    .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ id: "replacement-id", status: "uploaded" }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+  const result = await api.upload(
+    "case-id",
+    new File(["%PDF-test"], "synthetic.pdf"),
+    "client_profile",
+    "aws",
+    true,
+  );
+  expect(JSON.parse(fetch.mock.calls[0][1]?.body as string)).toMatchObject({
+    replace: true,
+    document_type: "client_profile",
+  });
+  expect(fetch.mock.calls[1][1]?.credentials).toBe("omit");
+  expect(fetch.mock.calls[2][0]).toContain(
+    "/documents/replacement-id/complete",
+  );
+  expect(result.id).toBe("replacement-id");
+});
+
+it("does not confirm or replace a document when the S3 upload fails", async () => {
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          document_id: "replacement-id",
+          url: "https://s3.example.test/upload",
+          fields: { key: "new-key" },
+          expires_in: 300,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    )
+    .mockResolvedValueOnce(new Response(null, { status: 403 }));
+  await expect(
+    api.upload(
+      "case-id",
+      new File(["%PDF-test"], "synthetic.pdf"),
+      "account_statement",
+      "aws",
+      true,
+    ),
+  ).rejects.toThrow("storage upload failed");
+  expect(fetch).toHaveBeenCalledTimes(2);
+});

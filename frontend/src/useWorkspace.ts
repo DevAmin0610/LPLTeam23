@@ -287,6 +287,11 @@ export function useWorkspace() {
             file,
             documentType,
             config.mode,
+            currentCase.documents.some(
+              (item) =>
+                item.document_type === documentType &&
+                item.status === "uploaded",
+            ),
           );
           setCurrentCase((value) =>
             value?.id === currentCase.id
@@ -294,14 +299,16 @@ export function useWorkspace() {
                   ...value,
                   documents: [
                     ...value.documents.filter(
-                      (item) => item.id !== document.id,
+                      (item) => item.document_type !== document.document_type,
                     ),
                     document,
                   ],
                 }
               : value,
           );
-          setNotice("PDF uploaded. Run analysis when your packet is ready.");
+          setNotice(
+            "PDF saved. Run analysis again to check the updated packet.",
+          );
         } finally {
           // Also fetch after failure: AWS may have registered a pending document.
           try {

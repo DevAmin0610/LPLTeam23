@@ -188,11 +188,13 @@ export const api = {
     file: File,
     documentType: DocumentType,
     mode: Mode,
+    replace = false,
   ): Promise<CaseDocument> {
     if (mode === "demo") {
       const form = new FormData();
       form.append("file", file);
       form.append("document_type", documentType);
+      form.append("replace", String(replace));
       return request<CaseDocument>(
         `${casePath(caseId)}/documents`,
         { method: "POST", body: form },
@@ -201,7 +203,11 @@ export const api = {
     }
     const upload = await request<PresignedUploadResponse>(
       `${casePath(caseId)}/uploads`,
-      json("POST", { filename: file.name, document_type: documentType }),
+      json("POST", {
+        filename: file.name,
+        document_type: documentType,
+        replace,
+      }),
     );
     const form = new FormData();
     for (const [name, value] of Object.entries(upload.fields))

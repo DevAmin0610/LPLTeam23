@@ -394,6 +394,11 @@ def test_presigned_upload_flow(client):
 def test_analyze_blocked_by_pending_upload(client):
     """analyze must be rejected while any document is still pending_upload."""
     case_id = client.post("/api/cases", json={"name": "Pending test"}).json()["id"]
+    client.app.state.service.p.documents.presign_upload = lambda key: {
+        "url": "https://s3.example.test/upload",
+        "fields": {"key": key},
+        "expires_in": 300,
+    }
     client.post(
         f"/api/cases/{case_id}/uploads",
         json={"document_type": "client_profile", "filename": "client_profile.pdf"},

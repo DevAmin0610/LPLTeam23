@@ -118,7 +118,11 @@ class CaseService:
         return self.get(str(record["id"]))
 
     def register_upload(
-        self, case_id: str, document_type: DocumentType, filename: str
+        self,
+        case_id: str,
+        document_type: DocumentType,
+        filename: str,
+        replace: bool = False,
     ) -> dict:
         self.record(case_id)
         document_id = str(uuid4())
@@ -136,14 +140,21 @@ class CaseService:
         def add(record):
             if record["job"] and record["job"]["status"] in ACTIVE:
                 raise CaseError("Analysis is running; uploads are locked.", 409)
-            if any(
-                d["document_type"] == document_type.value and d["status"] == "uploaded"
-                for d in record["documents"]
-            ):
+            existing = next(
+                (
+                    d
+                    for d in record["documents"]
+                    if d["document_type"] == document_type.value
+                    and d["status"] == "uploaded"
+                ),
+                None,
+            )
+            if existing and not replace:
                 raise CaseError(
-                    "One document per type is supported. Create a new case to replace the packet.",
-                    409,
+                    "A PDF already exists for this type. Choose Replace PDF.", 409
                 )
+            if existing:
+                document["replaces_document_id"] = existing["id"]
             # Replace any prior pending_upload for the same type.
             record["documents"] = [
                 d
@@ -154,10 +165,12 @@ class CaseService:
                 )
             ]
             record["documents"].append(document)
-            record.update(job=None, findings=[], model_input_preview=[])
+            if not existing:
+                record.update(job=None, findings=[], model_input_preview=[])
 
-        self.p.cases.update(case_id, add)
+        # Signing failure must not create a pending replacement or hide the original.
         presign = self.p.documents.presign_upload(key)
+        self.p.cases.update(case_id, add)
         return {"document_id": document_id, **presign}
 
     def complete_upload(self, case_id: str, document_id: str) -> dict:
@@ -172,17 +185,41 @@ class CaseService:
         size = self.p.documents.confirm_upload(doc["storage_key"])
 
         def mark_uploaded(record):
-            for d in record["documents"]:
-                if d["id"] == document_id:
-                    d["status"] = "uploaded"
-                    d["size"] = size
-                    return
-            raise CaseError("Document not found in this case.", 404)
+            if record["job"] and record["job"]["status"] in ACTIVE:
+                raise CaseError("Analysis is running; uploads are locked.", 409)
+            current = next(
+                (d for d in record["documents"] if d["id"] == document_id), None
+            )
+            if current is None:
+                raise CaseError("Upload was superseded. Upload the PDF again.", 409)
+            if current["status"] == "uploaded":
+                return
+            replacement_id = current.pop("replaces_document_id", None)
+            if replacement_id:
+                if not any(
+                    d["id"] == replacement_id and d["status"] == "uploaded"
+                    for d in record["documents"]
+                ):
+                    raise CaseError(
+                        "Source document changed. Upload the PDF again.", 409
+                    )
+                record["documents"] = [
+                    d for d in record["documents"] if d["id"] != replacement_id
+                ]
+            current["status"] = "uploaded"
+            current["size"] = size
+            record.update(job=None, findings=[], model_input_preview=[])
 
         updated = self.p.cases.update(case_id, mark_uploaded)
         return next(d for d in updated["documents"] if d["id"] == document_id)
 
-    def upload(self, case_id: str, document_type: DocumentType, content: bytes) -> dict:
+    def upload(
+        self,
+        case_id: str,
+        document_type: DocumentType,
+        content: bytes,
+        replace: bool = False,
+    ) -> dict:
         self.record(case_id)
         if not content or len(content) > MAX_UPLOAD:
             raise CaseError("PDF must be between 1 byte and 5 MB.", 413)
@@ -204,14 +241,23 @@ class CaseService:
         def add(record):
             if record["job"] and record["job"]["status"] in ACTIVE:
                 raise CaseError("Analysis is running; uploads are locked.", 409)
-            if any(
-                d["document_type"] == document_type.value for d in record["documents"]
+            if (
+                any(
+                    d["document_type"] == document_type.value
+                    and d["status"] == "uploaded"
+                    for d in record["documents"]
+                )
+                and not replace
             ):
                 raise CaseError(
-                    "One document per type is supported. Create a new case to replace the packet.",
-                    409,
+                    "A PDF already exists for this type. Choose Replace PDF.", 409
                 )
             self.p.documents.put(key, content)
+            record["documents"] = [
+                d
+                for d in record["documents"]
+                if d["document_type"] != document_type.value
+            ]
             record["documents"].append(document)
             record.update(job=None, findings=[], model_input_preview=[])
 
