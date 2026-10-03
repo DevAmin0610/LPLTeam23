@@ -14,4 +14,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 cdk.out/
+cdk.context.json
+.aws/
+*.pem
+*.key
 .DS_Store

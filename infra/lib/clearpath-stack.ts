@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import {
   App,
   ArnFormat,
+  Aws,
   CfnOutput,
   Duration,
   RemovalPolicy,
@@ -12,6 +13,7 @@ import {
   aws_apigatewayv2_authorizers as authorizers,
   aws_apigatewayv2_integrations as integrations,
   aws_bedrock as bedrock,
+  aws_cognito as cognito,
   aws_dynamodb as dynamodb,
   aws_iam as iam,
   aws_lambda as lambda,
@@ -21,6 +23,8 @@ import {
   aws_lambda_destinations as destinations,
 } from "aws-cdk-lib";
 import { Construct } from "constructs";
+import { ClearPathMemory } from "./memory";
+import { ClearPathWebsite } from "./website";
 
 export interface ClearPathConfig {
   existingBucketName?: string;
@@ -31,10 +35,15 @@ export interface ClearPathConfig {
   /** Exact additional model ARNs required by a cross-region inference profile. */
   additionalModelArns: string[];
   frontendOrigins: string[];
-  allowUnauthenticatedApi: boolean;
   localBundling: boolean;
   apiFunctionName?: string;
   workerFunctionName?: string;
+  authDomainPrefix?: string;
+  permissionsBoundaryArn?: string;
+  existingMemoryId?: string;
+  enableSemanticMemory: boolean;
+  memoryProcessingRegionConfirmed: boolean;
+  memoryEventExpiryDays: number;
 }
 
 function optional(app: App, name: string): string | undefined {
@@ -45,11 +54,20 @@ function optional(app: App, name: string): string | undefined {
   return value.trim();
 }
 
-function flag(app: App, name: string): boolean {
+function flag(app: App, name: string, fallback = false): boolean {
   const value = app.node.tryGetContext(name);
-  if (value === undefined || value === false || value === "false") return false;
+  if (value === undefined) return fallback;
+  if (value === false || value === "false") return false;
   if (value === true || value === "true") return true;
   throw new Error(`Invalid boolean context: ${name}`);
+}
+
+function integer(app: App, name: string, fallback: number): number {
+  const raw = app.node.tryGetContext(name);
+  const value = raw === undefined ? fallback : Number(raw);
+  if (!Number.isInteger(value))
+    throw new Error(`Invalid integer context: ${name}`);
+  return value;
 }
 
 function stringList(app: App, name: string, fallback: string[]): string[] {
@@ -109,10 +127,18 @@ export function readConfig(app: App): ClearPathConfig {
     modelId: optional(app, "modelId") ?? "amazon.nova-lite-v1:0",
     additionalModelArns,
     frontendOrigins,
-    allowUnauthenticatedApi: flag(app, "allowUnauthenticatedApi"),
     localBundling: flag(app, "localBundling"),
     apiFunctionName: optional(app, "apiFunctionName"),
     workerFunctionName: optional(app, "workerFunctionName"),
+    authDomainPrefix: optional(app, "authDomainPrefix"),
+    permissionsBoundaryArn: optional(app, "permissionsBoundaryArn"),
+    existingMemoryId: optional(app, "existingMemoryId"),
+    enableSemanticMemory: flag(app, "enableSemanticMemory", true),
+    memoryProcessingRegionConfirmed: flag(
+      app,
+      "memoryProcessingRegionConfirmed",
+    ),
+    memoryEventExpiryDays: integer(app, "memoryEventExpiryDays", 7),
   };
 }
 
@@ -126,6 +152,83 @@ export class ClearPathStack extends Stack {
   constructor(scope: Construct, id: string, props: ClearPathStackProps) {
     super(scope, id, props);
     const config = props.config;
+    if (this.region !== "us-east-1" && this.region !== Aws.REGION) {
+      throw new Error("ClearPath AWS deployment is restricted to us-east-1.");
+    }
+
+    const permissionsBoundary = config.permissionsBoundaryArn
+      ? iam.ManagedPolicy.fromManagedPolicyArn(
+          this,
+          "WorkshopPermissionsBoundary",
+          config.permissionsBoundaryArn,
+        )
+      : undefined;
+    if (permissionsBoundary) {
+      iam.PermissionsBoundary.of(this).apply(permissionsBoundary);
+    }
+
+    const website = new ClearPathWebsite(this, "Website");
+    const frontendOrigins = Array.from(
+      new Set([...config.frontendOrigins, website.origin]),
+    );
+
+    const userPool = new cognito.UserPool(this, "UserPool", {
+      selfSignUpEnabled: false,
+      signInAliases: { email: true },
+      autoVerify: { email: true },
+      signInCaseSensitive: false,
+      accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
+      mfa: cognito.Mfa.OPTIONAL,
+      mfaSecondFactor: { otp: true, sms: false },
+      passwordPolicy: {
+        minLength: 12,
+        requireDigits: true,
+        requireLowercase: true,
+        requireUppercase: true,
+        requireSymbols: true,
+        tempPasswordValidity: Duration.days(3),
+      },
+      featurePlan: cognito.FeaturePlan.LITE,
+      deletionProtection: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    const reviewScope = new cognito.ResourceServerScope({
+      scopeName: "review",
+      scopeDescription: "Access the authenticated ClearPath review API.",
+    });
+    const resourceServer = userPool.addResourceServer("ApiResourceServer", {
+      identifier: "clearpath",
+      scopes: [reviewScope],
+    });
+    const callbackUrls = Array.from(
+      new Set([...config.frontendOrigins, website.origin]),
+    );
+    const userPoolClient = userPool.addClient("BrowserClient", {
+      generateSecret: false,
+      preventUserExistenceErrors: true,
+      enableTokenRevocation: true,
+      authFlows: { userSrp: true },
+      accessTokenValidity: Duration.hours(1),
+      idTokenValidity: Duration.hours(1),
+      refreshTokenValidity: Duration.days(1),
+      oAuth: {
+        flows: { authorizationCodeGrant: true },
+        callbackUrls,
+        logoutUrls: callbackUrls,
+        scopes: [
+          cognito.OAuthScope.OPENID,
+          cognito.OAuthScope.EMAIL,
+          cognito.OAuthScope.resourceServer(resourceServer, reviewScope),
+        ],
+      },
+    });
+    const authDomainPrefix =
+      config.authDomainPrefix ?? `clearpath-${Aws.ACCOUNT_ID}`;
+    const authDomain = userPool.addDomain("ManagedLogin", {
+      cognitoDomain: { domainPrefix: authDomainPrefix },
+      managedLoginVersion: cognito.ManagedLoginVersion.CLASSIC_HOSTED_UI,
+    });
+
     const bucket = config.existingBucketName
       ? s3.Bucket.fromBucketName(this, "Documents", config.existingBucketName)
       : new s3.Bucket(this, "Documents", {
@@ -135,10 +238,10 @@ export class ClearPathStack extends Stack {
           enforceSSL: true,
           removalPolicy: RemovalPolicy.RETAIN,
           autoDeleteObjects: false,
-          cors: config.frontendOrigins.length
+          cors: frontendOrigins.length
             ? [
                 {
-                  allowedOrigins: config.frontendOrigins,
+                  allowedOrigins: frontendOrigins,
                   allowedMethods: [s3.HttpMethods.POST],
                   allowedHeaders: ["*"],
                   exposedHeaders: ["ETag"],
@@ -296,7 +399,7 @@ export class ClearPathStack extends Stack {
       BEDROCK_MODEL_ID: config.modelId,
       BEDROCK_GUARDRAIL_ID: guardrailId!,
       BEDROCK_GUARDRAIL_VERSION: guardrailVersion!,
-      CORS_ALLOWED_ORIGINS: config.frontendOrigins.join(","),
+      CORS_ALLOWED_ORIGINS: frontendOrigins.join(","),
     };
     // AWS_REGION is provided by Lambda. AWS_PROFILE must never be set here:
     // deployed functions use their execution roles, not workstation profiles.
@@ -316,6 +419,14 @@ export class ClearPathStack extends Stack {
     });
     workerLog.grantWrite(workerRole);
     apiLog.grantWrite(apiRole);
+    const memory = new ClearPathMemory(this, "AgentCoreMemory", {
+      existingMemoryId: config.existingMemoryId,
+      enableSemanticMemory: config.enableSemanticMemory,
+      memoryProcessingRegionConfirmed: config.memoryProcessingRegionConfirmed,
+      eventExpiryDays: config.memoryEventExpiryDays,
+      permissionsBoundary,
+    });
+
     const failedJobs = new sqs.Queue(this, "FailedJobs", {
       encryption: sqs.QueueEncryption.SQS_MANAGED,
       enforceSSL: true,
@@ -394,18 +505,22 @@ export class ClearPathStack extends Stack {
     );
     worker.grantInvoke(apiRole);
 
+    const jwtAuthorizer = new authorizers.HttpJwtAuthorizer(
+      "CognitoAuthorizer",
+      `https://cognito-idp.${this.region}.${this.urlSuffix}/${userPool.userPoolId}`,
+      { jwtAudience: [userPoolClient.userPoolClientId] },
+    );
     const httpApi = new apigw.HttpApi(this, "HttpApi", {
       apiName: `${this.stackName}-http`,
       defaultIntegration: new integrations.HttpLambdaIntegration(
         "ApiIntegration",
         api,
       ),
-      defaultAuthorizer: config.allowUnauthenticatedApi
-        ? undefined
-        : new authorizers.HttpIamAuthorizer(),
-      corsPreflight: config.frontendOrigins.length
+      defaultAuthorizer: jwtAuthorizer,
+      defaultAuthorizationScopes: ["clearpath/review"],
+      corsPreflight: frontendOrigins.length
         ? {
-            allowOrigins: config.frontendOrigins,
+            allowOrigins: frontendOrigins,
             allowMethods: [
               apigw.CorsHttpMethod.GET,
               apigw.CorsHttpMethod.POST,
@@ -436,5 +551,13 @@ export class ClearPathStack extends Stack {
     new CfnOutput(this, "GuardrailId", { value: guardrailId! });
     new CfnOutput(this, "GuardrailVersion", { value: guardrailVersion! });
     new CfnOutput(this, "FailedJobsQueueUrl", { value: failedJobs.queueUrl });
+    new CfnOutput(this, "UserPoolId", { value: userPool.userPoolId });
+    new CfnOutput(this, "UserPoolClientId", {
+      value: userPoolClient.userPoolClientId,
+    });
+    new CfnOutput(this, "AuthDomain", { value: authDomain.baseUrl() });
+    new CfnOutput(this, "AuthScope", { value: "clearpath/review" });
+    new CfnOutput(this, "AgentCoreMemoryId", { value: memory.memoryId });
+    new CfnOutput(this, "AgentCoreMemoryArn", { value: memory.memoryArn });
   }
 }
