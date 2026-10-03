@@ -1,6 +1,6 @@
 # ClearPath — reviewer-assisted document checks
 
-ClearPath reviews synthetic transfer-document packets, identifies missing information and discrepancies, presents source evidence, and lets a human reviewer accept or dismiss each finding. It is an independent hackathon prototype: **not endorsed by LPL Financial, not actual LPL policy, and not a regulatory compliance guarantee**. Use synthetic data only.
+ClearPath reviews synthetic transfer-document packets, identifies missing information and discrepancies, presents source evidence, and lets a human reviewer accept or dismiss each finding.
 
 ## Current status
 
