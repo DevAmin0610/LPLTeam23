@@ -6,16 +6,18 @@ credentials, and case records must never be logged here.
 
 from __future__ import annotations
 
-from copy import deepcopy
-from io import BytesIO
 import json
 import math
 import random
 import threading
 import time
-from typing import Any, Callable, Literal
+from collections.abc import Callable
+from copy import deepcopy
+from io import BytesIO
+from typing import Any, Literal
 
 from app.providers.interfaces import (
+    ExtractedField,
     Extraction,
     PrivacyResult,
     ProviderError,
@@ -103,6 +105,78 @@ class _AWSProvider:
             return self._clients[service]
 
 
+def _textract_box(block: dict[str, Any]) -> dict[str, float] | None:
+    raw = block.get("Geometry", {}).get("BoundingBox")
+    if raw is None:
+        return None
+    box = {
+        name.lower(): float(raw[name]) for name in ("Left", "Top", "Width", "Height")
+    }
+    if any(not math.isfinite(value) or not 0 <= value <= 1 for value in box.values()):
+        raise ValueError
+    return box
+
+
+def _relationship_ids(block: dict[str, Any], kind: str) -> list[str]:
+    return [
+        child_id
+        for relationship in block.get("Relationships", [])
+        if relationship.get("Type") == kind
+        for child_id in relationship.get("Ids", [])
+    ]
+
+
+def _textract_text(block: dict[str, Any], blocks: dict[str, dict[str, Any]]) -> str:
+    words = []
+    for child_id in _relationship_ids(block, "CHILD"):
+        child = blocks.get(child_id, {})
+        if child.get("BlockType") == "WORD" and isinstance(child.get("Text"), str):
+            words.append(child["Text"])
+        elif (
+            child.get("BlockType") == "SELECTION_ELEMENT"
+            and child.get("SelectionStatus") == "SELECTED"
+        ):
+            words.append("selected")
+    return " ".join(words).strip()
+
+
+def _textract_fields(response: dict[str, Any]) -> list[ExtractedField]:
+    blocks = {
+        block["Id"]: block
+        for block in response.get("Blocks", [])
+        if isinstance(block.get("Id"), str)
+    }
+    fields = []
+    for key in blocks.values():
+        if key.get("BlockType") != "KEY_VALUE_SET" or "KEY" not in key.get(
+            "EntityTypes", []
+        ):
+            continue
+        label = _textract_text(key, blocks)
+        value_ids = _relationship_ids(key, "VALUE")
+        if not label or len(value_ids) != 1 or value_ids[0] not in blocks:
+            continue
+        value_block = blocks[value_ids[0]]
+        confidence = (
+            min(
+                float(key.get("Confidence", 0)),
+                float(value_block.get("Confidence", 0)),
+            )
+            / 100
+        )
+        if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            raise ValueError
+        fields.append(
+            ExtractedField(
+                label=label,
+                value=_textract_text(value_block, blocks),
+                confidence=confidence,
+                bounding_box=_textract_box(value_block),
+            )
+        )
+    return fields
+
+
 class TextractExtractor(_AWSProvider):
     def extract(self, content: bytes) -> Extraction:
         _pdf(content)
@@ -117,8 +191,8 @@ class TextractExtractor(_AWSProvider):
         except Exception:
             raise UnsupportedDocument("unsupported_document_format") from None
         try:
-            response = self._client("textract").detect_document_text(
-                Document={"Bytes": content}
+            response = self._client("textract").analyze_document(
+                Document={"Bytes": content}, FeatureTypes=["FORMS"]
             )
             if response.get("DocumentMetadata", {}).get("Pages", 1) != 1:
                 raise UnsupportedDocument("unsupported_document_pages")
@@ -134,21 +208,18 @@ class TextractExtractor(_AWSProvider):
                     or not 0 <= confidence <= 1
                 ):
                     raise ValueError
-                raw_box = block.get("Geometry", {}).get("BoundingBox")
-                box = None
-                if raw_box is not None:
-                    box = {
-                        name.lower(): float(raw_box[name])
-                        for name in ("Left", "Top", "Width", "Height")
-                    }
-                    if any(
-                        not math.isfinite(v) or not 0 <= v <= 1 for v in box.values()
-                    ):
-                        raise ValueError
                 lines.append(
-                    TextLine(text=text, confidence=confidence, bounding_box=box)
+                    TextLine(
+                        text=text,
+                        confidence=confidence,
+                        bounding_box=_textract_box(block),
+                    )
                 )
-            return Extraction(lines=lines, page_count=1)
+            return Extraction(
+                lines=lines,
+                page_count=1,
+                fields=_textract_fields(response),
+            )
         except UnsupportedDocument:
             raise
         except Exception:

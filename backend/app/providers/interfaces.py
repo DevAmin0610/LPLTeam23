@@ -28,9 +28,18 @@ class TextLine:
 
 
 @dataclass
+class ExtractedField:
+    label: str
+    value: str
+    confidence: float = 1.0
+    bounding_box: dict[str, float] | None = None
+
+
+@dataclass
 class Extraction:
     lines: list[TextLine]
     page_count: int = 1
+    fields: list[ExtractedField] = field(default_factory=list)
 
 
 @dataclass
