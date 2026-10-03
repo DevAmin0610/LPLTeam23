@@ -1,11 +1,11 @@
 # ClearPath API contract (v1)
 
-**Status:** local routes below are implemented and tested. AWS handlers, presigned uploads and AgentCore lessons are implemented but not yet verified against deployed AWS resources.
+**Status:** local routes and AWS presigned-upload routes are implemented and tested locally. AWS composition and Lambda handlers exist; the AgentCore lesson adapter has been verified against the deployed memory, but the full deployed flow has not been live-validated. The deployed API is configured for Cognito JWT access; frontend OAuth/PKCE remains incomplete. See `docs/handoff.md`.
 
 Python source of truth: `backend/app/schemas/models.py`; OpenAPI at `/openapi.json`.
-API base URL defaults to `http://localhost:8000`. JSON errors use `{ "detail": "safe message" }`. All identifiers are UUIDs.
+API base URL defaults to `http://localhost:8000`. JSON errors use `{ "detail": "safe message" }`. All identifiers are UUIDs; identifiers are not authorization.
 
-**Auth:** AWS mode expects API Gateway's JWT authorizer (Cognito) to verify `Authorization: Bearer <token>`; the backend reads the token's `sub` claim as the user ID. Without it, case and memory routes return 401. Cases are private to their creator: other users get 404. Demo mode uses one local user and needs no token. `/api/config` and `/api/samples*` stay public (synthetic files only).
+**Auth:** Local demo mode needs no token, is localhost/synthetic-only and uses one local user. In AWS, API Gateway requires a Cognito access token with the `clearpath/review` scope on every route, sent as `Authorization: Bearer <token>`. The backend reads the verified token's `sub` claim as the user ID and enforces per-user case ownership: case and memory routes return 401 without a user, and other users' cases return 404. The backend itself leaves `/api/config` and `/api/samples*` open (synthetic files only).
 
 - `GET /api/config`: `{mode: "demo"|"aws", banner: string, privacy_notice: string}`.
 - `POST /api/cases` JSON `{name: string}` -> 201 CaseResponse.

@@ -492,3 +492,185 @@ footer {
   display: block;
   margin-top: 2px;
 }
+
+/* ── Login screen ── */
+.login-backdrop {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3f5f4;
+  padding: 24px;
+}
+.login-card {
+  background: white;
+  border: 1px solid #dce5e0;
+  border-radius: 14px;
+  padding: 40px 36px 32px;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: 0 6px 24px #213d3808;
+}
+.login-brand {
+  font-size: 27px;
+  font-weight: 750;
+  color: #245e53;
+  margin-bottom: 4px;
+}
+.login-brand span {
+  color: #203c38;
+}
+.login-subtitle {
+  font-size: 12px;
+  color: #617570;
+  margin: 0 0 24px;
+}
+.login-form label {
+  margin-top: 14px;
+}
+.login-form button {
+  width: 100%;
+  margin-top: 20px;
+  padding: 11px;
+}
+.login-hint {
+  font-size: 11px;
+  color: #617570;
+  margin: 18px 0 8px;
+  background: #eef4ef;
+  border-radius: 6px;
+  padding: 10px 12px;
+  line-height: 1.7;
+}
+.login-hint code {
+  font-family: ui-monospace, monospace;
+  background: #ddeae0;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.login-disclaimer {
+  font-size: 11px;
+  color: #8a9e96;
+  line-height: 1.7;
+  margin: 0;
+}
+
+/* ── Header session ── */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.session-user {
+  font-size: 12px;
+  color: #4a6259;
+  font-weight: 600;
+}
+.logout-btn {
+  font-size: 11px;
+  padding: 6px 12px;
+}
+
+/* ── PDF viewer ── */
+.pdf-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.pdf-frame-wrap {
+  position: relative;
+}
+.pdf-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3f5f4cc;
+  font-size: 12px;
+  color: #617570;
+  z-index: 1;
+  border-radius: 5px;
+}
+.pdf-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.pdf-controls button {
+  font-size: 11px;
+  padding: 6px 10px;
+}
+.pdf-page-label {
+  font-size: 11px;
+  color: #617570;
+  flex: 1;
+  text-align: center;
+}
+
+/* ── Memory panel enhancements ── */
+.memory-pattern-info {
+  flex: 1;
+  min-width: 0;
+}
+.memory-pattern-label {
+  display: block;
+  margin-bottom: 6px;
+}
+.memory-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: #e3e9e5;
+  display: flex;
+  overflow: hidden;
+  gap: 1px;
+}
+.memory-bar-accepted {
+  background: #b4553f;
+  border-radius: 3px 0 0 3px;
+  transition: width 0.3s;
+}
+.memory-bar-dismissed {
+  background: #3f7a96;
+  border-radius: 0 3px 3px 0;
+  transition: width 0.3s;
+}
+.memory-pattern-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.stat-accepted {
+  color: #7a3a2e;
+}
+.stat-dismissed {
+  color: #2e5f78;
+}
+.memory-total {
+  font-size: 11px;
+  color: #8a9e96;
+}
+.memory-footer {
+  margin-top: 12px;
+  border-top: 1px solid #e3e9e5;
+  padding-top: 10px;
+}
+.learned-list li {
+  flex-direction: row;
+  align-items: center;
+}
+@media (max-width: 600px) {
+  .login-card {
+    padding: 28px 20px 24px;
+  }
+  .learned-list li {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .memory-pattern-stats {
+    align-items: flex-start;
+  }
+}

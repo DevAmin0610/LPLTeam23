@@ -45,7 +45,7 @@ Select a sample and **Load sample case**. This uploads the committed synthetic P
 - Real `pypdf` extraction and versioned sample rules for missing fields, SSN/account mismatches, and address differences.
 - Protected comparisons before sanitization; deterministic explanation templates; input/output privacy checks that fail closed.
 - Nine downloadable, synthetic PDFs across three packets; reproducible generator.
-- Provider ports and draft AWS adapters; CDK resource definitions. **AWS runtime is intentionally not wired or enabled.**
+- Provider ports, AWS adapters/composition and Lambda handlers; CDK resources for the runtime, Cognito, AgentCore Memory and CloudFront. **No resources have been deployed or live-validated.**
 
 ## Checks and formatting
 
@@ -71,7 +71,8 @@ Read [the handoff](docs/handoff.md), [API contract](docs/api-contract.md), and [
 
 - Demo extraction supports small, single-page, unencrypted **text-based** PDFs with exact sample field labels. Scanned/image-containing, unreadable, multipage and unsupported layouts require manual review. Max 5 MB/file.
 - Local masking supports the synthetic identifier formats only; **not production-grade PII detection**. The raw synthetic PDF is deliberately visible in the source viewer; excerpts and model inputs omit values. User-entered case names and review notes are not privacy-filtered: never put sensitive information in them.
-- No authentication or case ownership checks. UUIDs and CORS are not authorization. Never expose this demo publicly. Public deployment requires authentication, server-side case-access enforcement, upload/body limits, security review and operational controls.
+- Local demo mode has no authentication. The AWS infrastructure defines invite-only Cognito and JWT-protected API Gateway access, but the frontend OAuth/PKCE flow and backend case ownership checks are not implemented. Authentication, UUIDs and CORS are not case authorization; do not expose the deployment publicly until those controls, upload/body limits, security review and operational controls are complete.
 - Standard AWS credential chain will be used by the draft lazy adapters. Keep temporary credentials/profile configuration outside this repository. No AWS credentials belong in the frontend.
-- `APP_MODE=aws` checks missing settings, then explicitly refuses startup until AWS composition is implemented; it never silently falls back to demo.
-- No resources deployed, no IAM changes, no CDK bootstrap. Do not deploy this starter.
+- `APP_MODE=aws` validates required settings and uses the AWS composition; it never silently falls back to demo.
+- AgentCore Memory provisioning is implemented, but the backend still uses its DynamoDB review-history store. Do not claim live semantic learning until approved/sanitized ingestion and retrieval are integrated.
+- No resources deployed, no IAM changes, no CDK bootstrap. Follow `docs/aws-deployment-runbook.md` only after workshop authorization and all release gates are satisfied.

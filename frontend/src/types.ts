@@ -1,3 +1,10 @@
+export interface AuthSession {
+  username: string;
+  token: string;
+  /** ISO timestamp */
+  created_at: string;
+}
+
 export type DocumentType =
   | "client_profile"
   | "transfer_application"
