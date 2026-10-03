@@ -504,9 +504,10 @@ class DynamoCaseStorage(_AWSProvider):
             if not job or job.get("id") != run_id:
                 return False
             status = job.get("status")
-            if not (status == "queued" or (
-                status == "processing" and self._lease_expired(job)
-            )):
+            if not (
+                status == "queued"
+                or (status == "processing" and self._lease_expired(job))
+            ):
                 return False
             job.update(
                 status="processing",
@@ -517,7 +518,11 @@ class DynamoCaseStorage(_AWSProvider):
             try:
                 self._client("dynamodb").put_item(
                     TableName=_setting(self.settings, "dynamodb_cases_table"),
-                    Item={"id": {"S": case_id}, "data": {"S": data}, "version": {"N": str(version + 1)}},
+                    Item={
+                        "id": {"S": case_id},
+                        "data": {"S": data},
+                        "version": {"N": str(version + 1)},
+                    },
                     ConditionExpression="attribute_exists(#id) AND #version = :expected",
                     ExpressionAttributeNames={"#id": "id", "#version": "version"},
                     ExpressionAttributeValues={":expected": {"N": str(version)}},
@@ -551,7 +556,11 @@ class DynamoCaseStorage(_AWSProvider):
             try:
                 self._client("dynamodb").put_item(
                     TableName=_setting(self.settings, "dynamodb_cases_table"),
-                    Item={"id": {"S": case_id}, "data": {"S": data}, "version": {"N": str(version + 1)}},
+                    Item={
+                        "id": {"S": case_id},
+                        "data": {"S": data},
+                        "version": {"N": str(version + 1)},
+                    },
                     ConditionExpression="attribute_exists(#id) AND #version = :expected",
                     ExpressionAttributeNames={"#id": "id", "#version": "version"},
                     ExpressionAttributeValues={":expected": {"N": str(version)}},
@@ -596,7 +605,11 @@ class DynamoCaseStorage(_AWSProvider):
             try:
                 self._client("dynamodb").put_item(
                     TableName=_setting(self.settings, "dynamodb_cases_table"),
-                    Item={"id": {"S": case_id}, "data": {"S": data}, "version": {"N": str(version + 1)}},
+                    Item={
+                        "id": {"S": case_id},
+                        "data": {"S": data},
+                        "version": {"N": str(version + 1)},
+                    },
                     ConditionExpression="attribute_exists(#id) AND #version = :expected",
                     ExpressionAttributeNames={"#id": "id", "#version": "version"},
                     ExpressionAttributeValues={":expected": {"N": str(version)}},

@@ -53,7 +53,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         service = CaseService(providers)
         providers.dispatcher = LocalJobDispatcher(service.process)
         app.state.service = service
-        yield       
+        yield
         providers.dispatcher.close()
 
     app = FastAPI(title="ClearPath — synthetic local starter", lifespan=lifespan)

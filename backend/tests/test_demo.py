@@ -150,10 +150,21 @@ def test_second_worker_cannot_claim_active_lease(client):
     case_id = client.post("/api/cases", json={"name": "Lease test"}).json()["id"]
     # Inject a queued job directly so the local dispatcher doesn't run it.
     run_id = "run-lease-test"
-    service.p.cases.update(case_id, lambda r: r.update(job=dict(
-        id=run_id, case_id=case_id, status="queued", progress=0,
-        stage="Queued", errors=[], created_at="now", updated_at="now",
-    )))
+    service.p.cases.update(
+        case_id,
+        lambda r: r.update(
+            job=dict(
+                id=run_id,
+                case_id=case_id,
+                status="queued",
+                progress=0,
+                stage="Queued",
+                errors=[],
+                created_at="now",
+                updated_at="now",
+            )
+        ),
+    )
     # First worker claims the lease.
     assert service.p.cases.claim_run(case_id, run_id, "worker-A", 300)
     # Second worker must not claim it.
@@ -168,10 +179,21 @@ def test_expired_lease_allows_recovery(client):
     service = client.app.state.service
     case_id = client.post("/api/cases", json={"name": "Expiry test"}).json()["id"]
     run_id = "run-expiry-test"
-    service.p.cases.update(case_id, lambda r: r.update(job=dict(
-        id=run_id, case_id=case_id, status="queued", progress=0,
-        stage="Queued", errors=[], created_at="now", updated_at="now",
-    )))
+    service.p.cases.update(
+        case_id,
+        lambda r: r.update(
+            job=dict(
+                id=run_id,
+                case_id=case_id,
+                status="queued",
+                progress=0,
+                stage="Queued",
+                errors=[],
+                created_at="now",
+                updated_at="now",
+            )
+        ),
+    )
     # Claim with a lease that has already expired.
     assert service.p.cases.claim_run(case_id, run_id, "worker-A", -1)
     claimed_by_b = service.p.cases.claim_run(case_id, run_id, "worker-B", 300)
@@ -185,14 +207,29 @@ def test_finish_run_rejects_wrong_owner(client):
     service = client.app.state.service
     case_id = client.post("/api/cases", json={"name": "Wrong owner test"}).json()["id"]
     run_id = "run-owner-test"
-    service.p.cases.update(case_id, lambda r: r.update(job=dict(
-        id=run_id, case_id=case_id, status="queued", progress=0,
-        stage="Queued", errors=[], created_at="now", updated_at="now",
-    )))
+    service.p.cases.update(
+        case_id,
+        lambda r: r.update(
+            job=dict(
+                id=run_id,
+                case_id=case_id,
+                status="queued",
+                progress=0,
+                stage="Queued",
+                errors=[],
+                created_at="now",
+                updated_at="now",
+            )
+        ),
+    )
     service.p.cases.claim_run(case_id, run_id, "worker-A", 300)
     result = dict(
-        findings=[], model_input_preview=[],
-        status="completed", progress=100, stage="Done", errors=[],
+        findings=[],
+        model_input_preview=[],
+        status="completed",
+        progress=100,
+        stage="Done",
+        errors=[],
     )
     published = service.p.cases.finish_run(case_id, run_id, "worker-B", result)
     assert not published
@@ -212,7 +249,11 @@ def test_presigned_upload_flow(client):
 
     def fake_presign(key):
         captured_key["key"] = key
-        return {"url": "https://s3.example.com/upload", "fields": {"key": key}, "expires_in": 300}
+        return {
+            "url": "https://s3.example.com/upload",
+            "fields": {"key": key},
+            "expires_in": 300,
+        }
 
     original_presign = service.p.documents.presign_upload
     service.p.documents.presign_upload = fake_presign
@@ -235,13 +276,12 @@ def test_presigned_upload_flow(client):
 
     # Simulate the S3 upload by writing the file directly via the local storage.
     storage_key = next(
-        d["storage_key"] for d in service.p.cases.get(case_id)["documents"]
+        d["storage_key"]
+        for d in service.p.cases.get(case_id)["documents"]
         if d["id"] == document_id
     )
     # Use a pre-generated sample PDF so we don't need reportlab in the test.
-    sample_pdf = (
-        SAMPLES_DIR / "complete" / "client_profile.pdf"
-    )
+    sample_pdf = SAMPLES_DIR / "complete" / "client_profile.pdf"
     service.p.documents.put(storage_key, sample_pdf.read_bytes())
 
     # Complete the upload.
@@ -276,9 +316,16 @@ def test_stuck_job_can_be_rerun(client):
 
     def inject(lease_expires_at):
         job = dict(
-            id="old-run", case_id=case_id, status="processing", progress=40,
-            stage="Extracting PDFs", errors=[], created_at="now", updated_at="now",
-            lease_owner="worker-A", lease_expires_at=lease_expires_at,
+            id="old-run",
+            case_id=case_id,
+            status="processing",
+            progress=40,
+            stage="Extracting PDFs",
+            errors=[],
+            created_at="now",
+            updated_at="now",
+            lease_owner="worker-A",
+            lease_expires_at=lease_expires_at,
         )
         service.p.cases.update(case_id, lambda r: r.update(job=job))
 
@@ -350,8 +397,13 @@ def test_review_memory_learns_only_approved_decisions(client):
     assert "Review memory" not in finding["explanation"]
     after = load(client, "formatting")
     informed = address_finding(after)
-    assert "Review memory: Reviewers dismissed this in 1 of 1" in informed["explanation"]
-    assert (informed["pattern"], informed["severity"]) == (finding["pattern"], finding["severity"])
+    assert (
+        "Review memory: Reviewers dismissed this in 1 of 1" in informed["explanation"]
+    )
+    assert (informed["pattern"], informed["severity"]) == (
+        finding["pattern"],
+        finding["severity"],
+    )
     assert any("approved_lessons" in p for p in after["model_input_preview"])
 
     # Saving without "remember" withdraws the lesson; reset clears everything.

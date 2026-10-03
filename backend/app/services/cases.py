@@ -117,7 +117,9 @@ class CaseService:
         self.p.cases.create(record)
         return self.get(record["id"])
 
-    def register_upload(self, case_id: str, document_type: DocumentType, filename: str) -> dict:
+    def register_upload(
+        self, case_id: str, document_type: DocumentType, filename: str
+    ) -> dict:
         self.record(case_id)
         document_id = str(uuid4())
         key = f"{case_id}/{document_id}.pdf"
@@ -144,8 +146,12 @@ class CaseService:
                 )
             # Replace any prior pending_upload for the same type.
             record["documents"] = [
-                d for d in record["documents"]
-                if not (d["document_type"] == document_type.value and d["status"] == "pending_upload")
+                d
+                for d in record["documents"]
+                if not (
+                    d["document_type"] == document_type.value
+                    and d["status"] == "pending_upload"
+                )
             ]
             record["documents"].append(document)
             record.update(job=None, findings=[], model_input_preview=[])
@@ -156,9 +162,7 @@ class CaseService:
 
     def complete_upload(self, case_id: str, document_id: str) -> dict:
         record = self.record(case_id)
-        doc = next(
-            (d for d in record["documents"] if d["id"] == document_id), None
-        )
+        doc = next((d for d in record["documents"] if d["id"] == document_id), None)
         if not doc:
             raise CaseError("Document not found in this case.", 404)
         if doc["status"] == "uploaded":
@@ -319,7 +323,9 @@ class CaseService:
             except Exception:
                 log.warning("case=%s category=lesson_write_failed", case_id)
 
-    def _memory_context(self, case_id: str, findings: list[dict]) -> dict[str, list[str]]:
+    def _memory_context(
+        self, case_id: str, findings: list[dict]
+    ) -> dict[str, list[str]]:
         """Approved lessons per pattern from OTHER cases, to inform explanations.
 
         Read when the analysis runs. A memory failure only means no lessons."""
@@ -415,7 +421,9 @@ class CaseService:
                 failures.append(
                     "Some fields or documents require manual review; this is not an all-clear."
                 )
-            self._job(case_id, run_id, stage="Sample rules and privacy checks", progress=65)
+            self._job(
+                case_id, run_id, stage="Sample rules and privacy checks", progress=65
+            )
             previews = []
             context = self._memory_context(case_id, findings)
             for item in findings:
