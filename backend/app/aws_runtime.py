@@ -1,5 +1,6 @@
 from app.config import Settings
 from app.providers.interfaces import Providers
+from app.providers.aws.agentcore import AgentCoreLessons
 from app.providers.aws.adapters import (
     TextractExtractor,
     GuardrailPrivacyFilter,
@@ -29,8 +30,10 @@ def create_aws_service(
         documents=S3DocumentStorage(settings),
         cases=DynamoCaseStorage(settings),
         dispatcher=None if worker else LambdaJobDispatcher(settings),
-        # Review memory is read and written by the API only.
-        memory=None if worker else DynamoMemoryStore(settings),
+        # The API records approved lessons; the worker reads them so explanations
+        # can mention past reviewer decisions (requires read access in both roles).
+        memory=DynamoMemoryStore(settings),
+        lessons=AgentCoreLessons(settings) if settings.agentcore_memory_id else None,
     )
 
     return CaseService(providers)

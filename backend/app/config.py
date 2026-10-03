@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     s3_document_bucket: str = ""
     dynamodb_cases_table: str = ""
     worker_lambda_function_name: str = ""
+    # Optional AgentCore Memory (long-term review lessons). Blank disables it;
+    # the namespace must match the semantic strategy configured on the memory.
+    agentcore_memory_id: str = ""
+    agentcore_memory_namespace: str = "/lessons/{actorId}"
 
     def validate_mode(self, *, worker: bool = False) -> None:
         if self.app_mode not in {"demo", "aws"}:

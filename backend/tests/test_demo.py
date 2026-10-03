@@ -127,6 +127,23 @@ def test_aws_does_not_fallback():
         Settings(app_mode="aws", aws_region="", bedrock_model_id="").validate_mode()
 
 
+def test_local_server_refuses_aws_mode(tmp_path):
+    """A fully configured AWS mode must not start the local (demo-provider) server."""
+    settings = Settings(
+        app_mode="aws",
+        local_data_dir=tmp_path,
+        aws_region="us-east-1",
+        bedrock_model_id="model",
+        bedrock_guardrail_id="guardrail",
+        bedrock_guardrail_version="1",
+        s3_document_bucket="bucket",
+        dynamodb_cases_table="table",
+        worker_lambda_function_name="worker",
+    )
+    with pytest.raises(ValueError, match="demo only"):
+        create_app(settings)
+
+
 def test_second_worker_cannot_claim_active_lease(client):
     """A second process() call while the first holds the lease must be a no-op."""
     service = client.app.state.service
@@ -246,3 +263,99 @@ def test_analyze_blocked_by_pending_upload(client):
     )
     resp = client.post(f"/api/cases/{case_id}/analyze")
     assert resp.status_code == 409
+
+
+def load(client, sample):
+    return complete(client, client.post(f"/api/samples/{sample}/load").json()["id"])
+
+
+def test_stuck_job_can_be_rerun(client):
+    """A worker that died mid-run must not lock the case on "processing"."""
+    service = client.app.state.service
+    case_id = client.post("/api/samples/complete/load").json()["id"]
+
+    def inject(lease_expires_at):
+        job = dict(
+            id="old-run", case_id=case_id, status="processing", progress=40,
+            stage="Extracting PDFs", errors=[], created_at="now", updated_at="now",
+            lease_owner="worker-A", lease_expires_at=lease_expires_at,
+        )
+        service.p.cases.update(case_id, lambda r: r.update(job=job))
+
+    # A live lease: no duplicate run is started.
+    inject(time.time() + 300)
+    assert client.post(f"/api/cases/{case_id}/analyze").json()["id"] == "old-run"
+    # An expired lease: shown as interrupted, and a fresh run completes.
+    inject(time.time() - 1)
+    assert client.get(f"/api/cases/{case_id}").json()["job"]["status"] == "interrupted"
+    case = complete(client, case_id)
+    assert case["job"]["id"] != "old-run" and case["job"]["status"] == "completed"
+
+
+def test_one_decision_is_not_called_a_pattern():
+    from app.services import memory
+
+    data = {}
+    memory.record(data, "ADDRESS_REVIEW:formatting_only", "case-1", "dismissed", "t1")
+    hint = memory.history(data, "ADDRESS_REVIEW:formatting_only", "new")["hint"]
+    assert "1 of 1" in hint and "not a pattern yet" in hint
+    memory.record(data, "ADDRESS_REVIEW:formatting_only", "case-2", "dismissed", "t2")
+    hint = memory.history(data, "ADDRESS_REVIEW:formatting_only", "new")["hint"]
+    assert "2 of 2" in hint and "Likely a false alarm" in hint
+
+
+def test_cases_are_private_to_their_owner(client):
+    service = client.app.state.service
+    mine = client.post("/api/cases", json={"name": "Mine"}).json()["id"]
+    theirs = service.create("Someone else's case", owner="another-user").id
+    assert client.get(f"/api/cases/{mine}").status_code == 200
+    assert client.get(f"/api/cases/{theirs}").status_code == 404
+    assert client.post(f"/api/cases/{theirs}/analyze").status_code == 404
+
+
+def address_finding(case):
+    return next(f for f in case["findings"] if f["rule_id"] == "ADDRESS_REVIEW")
+
+
+def test_address_explanation_matches_pattern(client):
+    same = address_finding(load(client, "formatting"))
+    moved = address_finding(load(client, "conflicting"))
+    assert same["pattern"] == "ADDRESS_REVIEW:formatting_only"
+    assert "only in formatting" in same["explanation"]
+    assert moved["pattern"] == "ADDRESS_REVIEW:different"
+    assert "different locations" in moved["explanation"]
+    assert "formatting" not in moved["explanation"]
+
+
+def test_review_memory_learns_only_approved_decisions(client):
+    first = load(client, "formatting")
+    finding = address_finding(first)
+    assert finding["memory"]["total"] == 0
+    review = f"/api/cases/{first['id']}/findings/{finding['id']}/review"
+
+    # A decision is not a lesson unless the reviewer approves it with "remember".
+    client.put(review, json={"status": "dismissed"})
+    assert client.get("/api/memory").json()["total_decisions"] == 0
+    client.put(review, json={"status": "dismissed", "remember": True})
+    assert client.get("/api/memory").json()["total_decisions"] == 1
+
+    # The next similar case shows the history but still reports the finding.
+    memory = address_finding(load(client, "formatting"))["memory"]
+    assert memory["dismissed"] == 1 and "1 of 1" in memory["hint"]
+    # A real address difference is a different kind of finding: no history applies.
+    assert address_finding(load(client, "conflicting"))["memory"]["total"] == 0
+
+    # Before/after: the approved lesson now informs the next case's explanation,
+    # and the explanation provider's input shows it. The finding is unchanged.
+    assert "Review memory" not in finding["explanation"]
+    after = load(client, "formatting")
+    informed = address_finding(after)
+    assert "Review memory: Reviewers dismissed this in 1 of 1" in informed["explanation"]
+    assert (informed["pattern"], informed["severity"]) == (finding["pattern"], finding["severity"])
+    assert any("approved_lessons" in p for p in after["model_input_preview"])
+
+    # Saving without "remember" withdraws the lesson; reset clears everything.
+    client.put(review, json={"status": "dismissed"})
+    assert client.get("/api/memory").json()["total_decisions"] == 0
+    client.put(review, json={"status": "dismissed", "remember": True})
+    assert client.post("/api/memory/reset").json()["total_decisions"] == 0

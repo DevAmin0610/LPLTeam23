@@ -22,7 +22,8 @@ def create_aws_app() -> FastAPI:
             if origin.strip()
         ],
         allow_methods=["GET", "POST", "PUT"],
-        allow_headers=["Content-Type"],
+        # The frontend sends the Cognito token as "Authorization: Bearer <JWT>".
+        allow_headers=["Content-Type", "Authorization"],
     )
 
     @app.exception_handler(CaseError)

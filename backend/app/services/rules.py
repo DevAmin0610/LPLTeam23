@@ -99,6 +99,17 @@ def comparison_pattern(rule_id: str, field: str, values: list[str]) -> str:
     return rule_id
 
 
+def difference_note(pattern: str) -> str:
+    """Explain a mismatch from its pattern so the text agrees with the finding label."""
+    if pattern.endswith(":formatting_only"):
+        return "The values differ only in formatting, such as abbreviations, punctuation or dashes; human review is needed."
+    if pattern.endswith(":transposed_digits"):
+        return "Two neighboring digits appear swapped, which is often a typo; human review is needed."
+    if pattern == "ADDRESS_REVIEW:different":
+        return "The addresses point to different locations; human review is needed."
+    return "The comparison was performed on original values inside the backend."
+
+
 def default_pattern(rule_id: str) -> str:
     kind = rule_id.split(":", 1)[0]
     # These rule IDs embed a document ID; the pattern must not.
@@ -240,10 +251,11 @@ def evaluate(
         if key == "SSN":
             values = [value.replace("-", "") for value in values]
         if len(set(values)) > 1:
-            explanation = f"{key} differs between supported documents. " + (
-                "This may be a formatting difference; human review is needed."
-                if key == "Address"
-                else "The comparison was performed on original values inside the backend."
+            pattern = comparison_pattern(
+                rule["id"], key, [fields[key] for _, fields in candidates]
+            )
+            explanation = (
+                f"{key} differs between supported documents. {difference_note(pattern)}"
             )
             evidence = [
                 {
@@ -264,9 +276,7 @@ def evaluate(
                     f"Confirm the correct {key if key.isupper() else key.lower()} with the client and reconcile the packet.",
                     evidence,
                     rule["severity"],
-                    comparison_pattern(
-                        rule["id"], key, [fields[key] for _, fields in candidates]
-                    ),
+                    pattern,
                 )
             )
     return findings
