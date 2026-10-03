@@ -270,6 +270,10 @@ function Workspace({
                   ))}
                 </select>
               </label>
+              <p className="muted">
+                Uploading for an existing type replaces its PDF after the upload
+                succeeds. Run analysis again after replacing a document.
+              </p>
               <label>
                 PDF · maximum 5 MB
                 <input
@@ -283,12 +287,21 @@ function Workspace({
                 />
               </label>
               <button disabled={busy || w.active || !file || !!fileError}>
-                Upload PDF
+                {c.documents.some(
+                  (d) => d.document_type === kind && d.status === "uploaded",
+                )
+                  ? "Replace PDF"
+                  : "Upload PDF"}
               </button>
               <button
                 className="primary"
                 type="button"
-                disabled={busy || w.active || !c.documents.length}
+                disabled={
+                  busy ||
+                  w.active ||
+                  !c.documents.length ||
+                  c.documents.some((d) => d.status === "pending_upload")
+                }
                 onClick={() => void w.analyze()}
               >
                 Analyze packet
@@ -313,7 +326,7 @@ function Workspace({
                 <h2>02 · Source documents</h2>
                 <PdfViewer
                   caseId={c.id}
-                  documents={c.documents}
+                  documents={c.documents.filter((d) => d.status === "uploaded")}
                   evidence={selected}
                   onSelectEvidence={setSelected}
                 />

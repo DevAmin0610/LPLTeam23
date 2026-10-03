@@ -32,6 +32,11 @@ def packet_findings(overrides: dict[str, tuple[str, ...]] | None = None):
         {"id": kind, "document_type": kind}
         for kind in ("client_profile", "transfer_application", "account_statement")
     ]
+    lines["transfer_application"] += (
+        "Date of Birth: 1991-11-27",
+        "Signature Date: 2026-08-31",
+        "Account Type: Roth IRA",
+    )
     extracted = {kind: extraction(*values) for kind, values in lines.items()}
     return evaluate("case", "run", documents, extracted)
 

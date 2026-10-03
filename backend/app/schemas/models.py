@@ -139,6 +139,7 @@ class CaseResponse(BaseModel):
 
 
 class UploadRequest(BaseModel):
+    replace: bool = False
     document_type: DocumentType
     filename: str = Field(min_length=1, max_length=180)
 
