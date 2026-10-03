@@ -1,6 +1,13 @@
-import { useState } from "react";
-import { apiUrl, safePreview, validatePdf } from "./api";
-import { getSession, logout } from "./auth";
+import { useEffect, useState } from "react";
+import { api, errorMessage, safePreview, validatePdf } from "./api";
+import {
+  completeCognitoLogin,
+  getAuthConfigurationError,
+  getSession,
+  hasAuthCallback,
+  logout,
+  onSessionExpired,
+} from "./auth";
 import { DOCUMENT_TYPES, categoryLabel, documentLabel } from "./types";
 import type {
   AuthSession,
@@ -16,9 +23,41 @@ import "./style.css";
 
 export default function App() {
   const [session, setSession] = useState<AuthSession | null>(getSession);
+  const [authBusy, setAuthBusy] = useState(hasAuthCallback);
+  const [authError, setAuthError] = useState(getAuthConfigurationError() || "");
+
+  useEffect(() => {
+    const stopListening = onSessionExpired(() => setSession(null));
+    if (hasAuthCallback()) {
+      void completeCognitoLogin()
+        .then((authenticated) => {
+          setSession(authenticated);
+          setAuthError("");
+        })
+        .catch((error: unknown) => {
+          setAuthError(
+            error instanceof Error
+              ? error.message
+              : "Sign-in could not complete.",
+          );
+        })
+        .finally(() => setAuthBusy(false));
+    }
+    return stopListening;
+  }, []);
+
+  if (authBusy) {
+    return (
+      <div className="login-backdrop">
+        <div className="login-card" role="status">
+          Completing secure sign-in…
+        </div>
+      </div>
+    );
+  }
 
   if (!session) {
-    return <LoginScreen onLogin={setSession} />;
+    return <LoginScreen onLogin={setSession} initialError={authError} />;
   }
 
   return <Workspace session={session} onLogout={() => setSession(null)} />;
@@ -42,6 +81,8 @@ function Workspace({
   const [remember, setRemember] = useState<Record<string, boolean>>({});
   const c = w.currentCase;
   const busy = !!w.busy || w.restoring;
+  const hosted = session.mode === "cognito";
+  const showSamples = w.config?.mode === "demo";
   const packet = w.samples.find((s) => s.id === sample);
 
   function handleLogout() {
@@ -49,23 +90,40 @@ function Workspace({
     onLogout();
   }
 
+  async function downloadSample(path: string, filename: string) {
+    setFileError("");
+    try {
+      const blob = await api.samplePdf(path);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
+      setFileError(errorMessage(error));
+    }
+  }
+
   return (
     <>
       <header>
-        <a className="brand" href="/">
-          C<span>ClearPath</span>
+        <a className="brand" href="/" aria-label="ClearPath home">
+          <img className="brand-logo" src="/clearpath.png" alt="ClearPath" />
         </a>
         <div className="header-right">
-          <span className="pill">HACKATHON STARTER</span>
+          {!hosted && <span className="pill">HACKATHON STARTER</span>}
           <span className="session-user">{session.username}</span>
           <button className="logout-btn" onClick={handleLogout}>
             Sign out
           </button>
         </div>
       </header>
-      <div className="banner">
-        {w.config?.banner ?? "Connecting to the local API…"}
-      </div>
+      {!hosted && (
+        <div className="banner">
+          {w.config?.banner ?? "Connecting to the local API…"}
+        </div>
+      )}
       <main>
         <div className="intro">
           <div>
@@ -76,11 +134,13 @@ function Workspace({
               decision.
             </p>
           </div>
-          <div className="disclaimer">
-            Independent hackathon prototype.
-            <br />
-            Not endorsed by LPL Financial. Sample policies only.
-          </div>
+          {!hosted && (
+            <div className="disclaimer">
+              Independent hackathon prototype.
+              <br />
+              Not endorsed by LPL Financial. Sample policies only.
+            </div>
+          )}
         </div>
         <p className="privacy">
           {w.config?.privacy_notice ??
@@ -108,40 +168,49 @@ function Workspace({
             {w.notice}
           </p>
         )}
-        <section className="setup panel">
-          <div>
-            <h2>01 · Start with a packet</h2>
-            <label htmlFor="sample">Synthetic sample</label>
-            <select
-              id="sample"
-              value={sample}
-              onChange={(e) => setSample(e.target.value)}
-            >
-              {w.samples.map((s) => (
-                <option value={s.id} key={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <p className="muted">{packet?.description}</p>
-            <button
-              className="primary"
-              disabled={busy || !w.config || !packet}
-              onClick={() => {
-                setSelected(null);
-                void w.loadSample(sample);
-              }}
-            >
-              {w.busy === "sample" ? "Loading…" : "Load sample case"}
-            </button>
-            <div className="downloads">
-              {packet?.documents.map((d) => (
-                <a href={apiUrl(d.url)} key={d.document_type} download>
-                  {documentLabel(d.document_type)} ↓
-                </a>
-              ))}
+        <section className={`setup panel ${showSamples ? "" : "setup-single"}`}>
+          {showSamples && (
+            <div>
+              <h2>01 · Start with a packet</h2>
+              <label htmlFor="sample">Synthetic sample</label>
+              <select
+                id="sample"
+                value={sample}
+                onChange={(e) => setSample(e.target.value)}
+              >
+                {w.samples.map((s) => (
+                  <option value={s.id} key={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <p className="muted">{packet?.description}</p>
+              <button
+                className="primary"
+                disabled={busy || !packet}
+                onClick={() => {
+                  setSelected(null);
+                  void w.loadSample(sample);
+                }}
+              >
+                {w.busy === "sample" ? "Loading…" : "Load sample case"}
+              </button>
+              <div className="downloads">
+                {packet?.documents.map((document) => (
+                  <button
+                    className="download-link"
+                    type="button"
+                    key={document.document_type}
+                    onClick={() =>
+                      void downloadSample(document.url, document.filename)
+                    }
+                  >
+                    {documentLabel(document.document_type)} ↓
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -149,7 +218,11 @@ function Workspace({
               void w.createCase(name);
             }}
           >
-            <h2>Or create your own</h2>
+            <h2>
+              {showSamples
+                ? "Or create your own"
+                : "01 · Create a synthetic review case"}
+            </h2>
             <label htmlFor="case-name">
               Case name — no personal information
             </label>
@@ -419,12 +492,14 @@ function Workspace({
               : "Load a sample above to explore the review workflow."}
           </section>
         )}
-        <footer>
-          ClearPath · Local-first starter · No regulatory compliance guarantee
-          <br />
-          Unauthenticated demo. Public deployment requires authentication and
-          server-side case-access enforcement.
-        </footer>
+        {!hosted && (
+          <footer>
+            ClearPath · Local-first starter · No regulatory compliance guarantee
+            <br />
+            Unauthenticated demo. Public deployment requires authentication and
+            server-side case-access enforcement.
+          </footer>
+        )}
       </main>
     </>
   );

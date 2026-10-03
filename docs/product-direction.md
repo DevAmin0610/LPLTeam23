@@ -14,9 +14,11 @@ Suggested pitch:
 
 **Implemented local starter:** PDF extraction for supported synthetic fixtures, deterministic sample rules and explanations, case/job persistence in SQLite, local document storage, findings, accept/dismiss decisions, optional review notes, and a correction checklist. See `README.md` and `docs/handoff.md` for limitations.
 
-**Not implemented:** AgentCore integration, long-term memory extraction/retrieval, structured review reasons, lesson approval/promotion, memory provenance in the UI, or memory-based explanations. Existing review notes are not privacy-filtered and must not be sent directly to a model or memory service. Accepting a finding does not prove a correction was completed; dismissing one does not establish a reusable exception.
+**Implemented proof of concept:** reviewers can explicitly mark a decision `remember`; the application stores only its privacy-safe pattern and status in authoritative review memory. When configured with a Memory and semantic strategy ID, the AgentCore adapter ingests fixed lesson text that excludes reviewer notes and source values, and retrieved advisory lessons can inform later explanations without changing findings.
 
-**AWS status:** adapters, AWS composition, Lambda handlers and CDK definitions exist, including AgentCore Memory provisioning, Cognito and CloudFront. They have not been live-validated or deployed. The backend still uses DynamoDB review history rather than AgentCore ingestion/retrieval. Resource definitions are not deployed resources. This direction does not authorize deployment, bootstrapping, IAM changes, or resource creation.
+**Not implemented:** structured review reasons, role-based lesson approval, tenant-scoped memory, complete AgentCore provenance/revocation, or memory provenance in the UI. Existing review notes are not privacy-filtered and must not be sent directly to a model or memory service. Accepting a finding does not prove a correction was completed; dismissing one does not establish a reusable exception.
+
+**AWS status:** the stack is deployed in account `033890317696`, `us-east-1`, with CloudFormation status `UPDATE_COMPLETE`. Cognito sign-in, JWT-protected frontend/API connectivity, CORS preflight handling, and unauthenticated `401` behavior are verified. AgentCore Memory is provisioned, but no runtime strategy ID is configured, so AgentCore ingestion/retrieval is inactive. DynamoDB remains authoritative for approval eligibility. The complete AWS upload/analyze/review workflow has not yet been validated. This direction does not authorize further deployment, bootstrapping, IAM changes, resource creation, or runtime activation.
 
 ## Proposed feedback loop
 
@@ -31,11 +33,11 @@ For example, in a **fictional sample workflow**, an address discrepancy may invo
 
 ## Knowledge boundaries
 
-| Layer                                                            | Responsibility                                                             | Authority                                                           |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Case records: local storage now; S3 and DynamoDB planned for AWS | Source documents, case/job state, findings, review decisions and rationale | Evidence and recorded events for a specific case                    |
-| Versioned rules and approved policy sources                      | Explicit business requirements and deterministic checks                    | What the application must enforce                                   |
-| AgentCore Memory: proposed                                       | Sanitized, approved lessons retrieved from prior reviews                   | Advisory context, never a replacement for policy or source evidence |
+| Layer                                                                                          | Responsibility                                                             | Authority                                                           |
+| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Case records: SQLite locally; S3/DynamoDB provisioned for AWS, full workflow not yet validated | Source documents, case/job state, findings, review decisions and rationale | Evidence and recorded events for a specific case                    |
+| Versioned rules and approved policy sources                                                    | Explicit business requirements and deterministic checks                    | What the application must enforce                                   |
+| AgentCore Memory: resource provisioned; runtime integration inactive                           | Sanitized, approved lessons retrieved from prior reviews                   | Advisory context, never a replacement for policy or source evidence |
 
 A newer memory must not override an approved rule merely because it is newer. Conflicts require review. Maintain approval, provenance, scope, applicable policy/rule version, and revocation records in the authoritative application store rather than relying on model-generated summaries as an audit record. Recheck lesson eligibility when retrieving it.
 
@@ -48,7 +50,7 @@ The team received a workshop recommendation to investigate **Amazon Bedrock Agen
 - AgentCore Runtime and AgentCore Memory are separate choices. Memory can be called from an application hosted elsewhere, including Lambda. Do not replace the existing execution architecture solely to add memory.
 - Extraction is asynchronous. Persist the review synchronously in the application store, expose pending/failed lesson processing honestly, and do not assume immediate retrieval after ingestion.
 - A memory-service failure must never fabricate a lesson or substitute demo output. Whether an AWS analysis may continue without optional memory must be explicitly designed and tested; privacy failures always stop the affected model/memory invocation.
-- Confirm workshop permissions, availability, cost, and all processing/model region constraints before provisioning. The team's workshop restriction is **us-east-1 only**; do not assume cross-region inference is allowed.
+- Confirm workshop permissions, availability, cost, and all processing/model region constraints before changing Memory configuration or activating runtime ingestion/retrieval. Provisioning alone does not establish that semantic processing is permitted or active. The team's workshop restriction is **us-east-1 only**; do not assume cross-region inference is allowed.
 
 Background: [AWS: Building smarter AI agents—AgentCore long-term memory deep dive](https://aws.amazon.com/jp/blogs/machine-learning/building-smarter-ai-agents-agentcore-long-term-memory-deep-dive/). The article describes semantic, preference, and summary strategies, extraction/consolidation, and retrieval trade-offs. Its benchmarks do not establish ClearPath accuracy or business outcomes.
 

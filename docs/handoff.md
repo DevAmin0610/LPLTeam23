@@ -1,46 +1,46 @@
-# Team handoff — intentionally partial MVP
+# Team handoff — deployed hackathon prototype
 
-The local vertical slice works. AWS adapters, composition, Lambda handlers and expanded CDK resources now exist, but remain **unverified integration code**, not a deployed system.
+The local vertical slice works, and the AWS stack is deployed in account `033890317696`, `us-east-1`, with CloudFormation status `UPDATE_COMPLETE`. The frontend is published at https://d5ztmc348hleb.cloudfront.net. Cognito sign-in, protected frontend/API connectivity, CORS preflight handling, and unauthenticated rejection are verified; the complete AWS case workflow remains unvalidated.
 
 ## Product direction: planned reviewer-feedback memory loop
 
-Read [the product direction](product-direction.md) before extending this starter. The team plans to explore AgentCore Memory to turn validated reviewer rationale into sanitized, explicitly approved reusable lessons. The initial proof of concept should improve explanations and suggested next steps for similar synthetic cases, not change deterministic findings or approve cases.
+Read [the product direction](product-direction.md) before extending this starter. The team is exploring AgentCore Memory to turn validated reviewer rationale into sanitized, explicitly approved reusable lessons. The initial proof of concept should improve explanations and suggested next steps for similar synthetic cases, not change deterministic findings or approve cases.
 
-No memory integration, lesson approval workflow, or structured review reason exists yet. Current free-text notes must not be ingested directly. Plan access isolation, provenance, policy-version applicability, revocation, asynchronous extraction, and evaluation before implementing shared memory. AgentCore Runtime and a knowledge graph are not prerequisites. Workshop AWS processing is restricted to `us-east-1`; confirm all model/memory processing constraints.
+An opt-in AgentCore lesson adapter and explicit `remember` approval now exist. It sends fixed pattern/status lesson text, never free-text review notes or source values, and retrieved lessons affect explanations only. A concrete semantic strategy ID is required before CDK grants runtime access. Tenant isolation, role-based approval, complete provenance/policy-version applicability, revocation, asynchronous status and evaluation remain future work; do not enable shared multi-user memory until those controls are complete. AgentCore Runtime and a knowledge graph are not prerequisites. Workshop AWS processing is restricted to `us-east-1`; confirm all model/memory processing constraints.
 
 ## Ownership boundaries
 
-| Team           | Owns                | Next work                                                                                                                                                              |
-| -------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Frontend       | `frontend/`         | Split the starter screen into components, refine accessibility/error handling, add browser E2E tests, improve document viewer and case navigation.                     |
-| Backend        | `backend/`, `demo/` | AWS composition/handlers and presigned registration/completion, durable worker leases/retries, auth/case ownership, parser/privacy hardening and more tests.           |
-| Infrastructure | `infra/`            | Validate synthesized template and packaging after handlers exist, workshop resource imports, permission boundaries, model/inference-profile IAM and deployment review. |
+| Team           | Owns                | Next work                                                                                                                                             |
+| -------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend       | `frontend/`         | Add browser E2E coverage, refine accessibility/error recovery, and improve document viewing and case navigation.                                      |
+| Backend        | `backend/`, `demo/` | Live-validate presigned uploads and worker processing; harden parser/privacy behavior, retries, limits, failure reconciliation, and operational logs. |
+| Infrastructure | `infra/`            | Validate provider permissions and limits, two-user ownership, monitoring/failure destinations, and controlled AgentCore runtime activation.           |
 
 Coordinate changes to `backend/app/schemas/models.py`, `frontend/src/types.ts`, and `docs/api-contract.md`. Provider ports are in `backend/app/providers/interfaces.py`. HTTP and SDK dependencies do not belong in the rule engine.
 
 ## Current backend behavior
 
-SQLite stores case/job/findings and separate review dictionaries. Machine publication never replaces reviews. Stable finding IDs are derived from case/run/rule; same-run duplicate delivery is a no-op. New runs use new IDs; prior decisions are retained but not applied automatically to different analyses. Pending/processing jobs are interrupted at local startup; use one local API process. No worker leases or AWS retry recovery are implemented yet.
+SQLite stores case/job/findings and separate review dictionaries. Machine publication never replaces reviews. Stable finding IDs are derived from case/run/rule; same-run duplicate delivery is a no-op. New runs use new IDs; prior decisions are retained but not applied automatically to different analyses. Pending/processing jobs are interrupted at local startup; use one local API process. Local and DynamoDB workers use owner-checked leases, renew them between processing stages, and permit recovery after expiry.
 
 Only labeled synthetic fields are parsed; conservative address normalization collapses whitespace and case only. Ambiguous/duplicate/unrecognized identifiers are flagged for review. Field values are compared before redaction, and explanation payloads are allowlisted deterministic text. Local evidence uses page navigation and withheld values, not invented coordinates. Accepted means the reviewer agrees, not that a correction is completed.
 
-## AWS work intentionally deferred
+## AWS integration validation still required
 
-`providers/aws/adapters.py` contains lazy boto3 adapters for Textract, ApplyGuardrail, Converse, S3, DynamoDB, and asynchronous Lambda dispatch. AWS composition and Lambda handlers now connect them, but they have not been tested against AWS. Review their behavior before enabling them; do not advertise live integration.
+`providers/aws/adapters.py` contains lazy boto3 adapters for Textract, ApplyGuardrail, Converse, S3, DynamoDB, and asynchronous Lambda dispatch. The stack and basic authenticated frontend/API path are live, including the deployed CORS preflight route. Textract, Guardrails, Bedrock, presigned upload, worker processing, and the complete review path have not yet been validated end to end; do not advertise those integrations as proven.
 
-Required before switching modes:
+Required before claiming a validated AWS workflow or expanding access:
 
 1. Live-validate the separate AWS composition and API/worker Lambda handler lifecycle; demo startup must never import or initialize AWS clients.
 2. Live-validate case-bound presigned upload registration/completion, object-size/type validation and immutable source keys after finalization.
-3. Live-validate worker lease/attempt ownership, stale-job recovery, asynchronous failure reconciliation and bounded durable history under Lambda retries.
+3. Live-validate worker lease/attempt ownership and stale-job recovery under Lambda retries; asynchronous failure reconciliation and bounded durable history remain incomplete.
 4. Validate privacy behavior with mocked SDK blocked/masked/unchanged/error responses. Fail closed; never send raw IDs or source text to Converse or logs.
-5. Complete Cognito OAuth/PKCE in the frontend and enforce server-side case access from verified claims. API Gateway JWT authentication alone is not case authorization.
-6. Implement sanitized, explicitly approved AgentCore lesson ingestion/retrieval and revocation before claiming live semantic learning.
+5. Cognito authorization code + PKCE sign-in and bearer-token frontend/API calls are validated. Still validate logout, token expiry, required-scope behavior, and server-side ownership using two invited synthetic-demo users.
+6. Live-validate sanitized, explicitly approved AgentCore lesson ingestion/retrieval, then add authoritative provenance, policy applicability and revocation before shared use or claims of live semantic learning.
 7. Verify S3/DynamoDB limits, API Gateway PDF delivery, guardrail and model/profile permission details and package size.
 
 ## Infrastructure status
 
-CDK definitions include private S3, DynamoDB, JWT-protected HTTP API, Cognito, API/worker Lambdas, guardrail, AgentCore Memory, private CloudFront hosting and scoped IAM. Existing bucket/table/guardrail/Memory identifiers can be supplied through context. No live lookups are needed. Packaging includes the implemented Lambda handlers, and infrastructure assertions cover authentication, Memory and hosting. No deployment or bootstrap has been run; follow `aws-deployment-runbook.md` only after authorization.
+CDK provisions private S3, DynamoDB, a JWT-protected HTTP API, Cognito, API/worker Lambdas, a guardrail, AgentCore Memory, private CloudFront hosting, and scoped IAM. The `ClearPath` stack is deployed and the frontend is published. AgentCore Memory is provisioned without a configured runtime strategy ID, so Lambda ingestion/retrieval permissions are inactive. Existing resource identifiers can also be supplied through context, and no live lookups are required. Follow `aws-deployment-runbook.md` for authorized updates and remaining validation.
 
 ## Known local limitations
 

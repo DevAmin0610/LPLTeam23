@@ -1,3 +1,4 @@
+import { expireSession, getAccessToken, isCognitoConfigured } from "./auth";
 import type {
   CaseDocument,
   CaseResponse,
@@ -20,8 +21,6 @@ export const apiUrl = (path: string) =>
   `${API_BASE_URL}/${path.replace(/^\/+/, "")}`;
 const segment = encodeURIComponent;
 const casePath = (id: string) => `/api/cases/${segment(id)}`;
-export const documentUrl = (caseId: string, documentId: string) =>
-  apiUrl(`${casePath(caseId)}/documents/${segment(documentId)}`);
 
 export class ApiError extends Error {
   constructor(
@@ -40,6 +39,7 @@ export const errorMessage = (error: unknown) =>
 // Only the API's public detail field is eligible for display; never surface raw
 // response bodies, storage upload fields, request URLs, or browser network errors.
 async function failure(response: Response): Promise<ApiError> {
+  if (response.status === 401 && isCognitoConfigured()) expireSession();
   let message =
     response.status === 404
       ? "This case or resource could not be found."
@@ -64,11 +64,11 @@ async function failure(response: Response): Promise<ApiError> {
   return new ApiError(message, response.status);
 }
 
-async function request<T>(
+async function send(
   path: string,
   init: RequestInit = {},
   timeoutMs = 25_000,
-): Promise<T> {
+): Promise<Response> {
   const controller = new AbortController();
   const callerSignal = init.signal;
   const abort = () => controller.abort();
@@ -80,19 +80,21 @@ async function request<T>(
     controller.abort();
   }, timeoutMs);
   try {
+    const accessToken = getAccessToken();
+    if (isCognitoConfigured() && !accessToken) {
+      expireSession();
+      throw new ApiError("Your session expired. Sign in again.", 401);
+    }
+    const headers = new Headers(init.headers);
+    if (!headers.has("Accept")) headers.set("Accept", "application/json");
+    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
     const response = await fetch(apiUrl(path), {
       ...init,
       signal: controller.signal,
-      headers: { Accept: "application/json", ...init.headers },
+      headers,
     });
     if (!response.ok) throw await failure(response);
-    try {
-      return (await response.json()) as T;
-    } catch {
-      throw new ApiError(
-        "The server returned an unreadable response. Refresh and try again.",
-      );
-    }
+    return response;
   } catch (error) {
     if (callerSignal?.aborted)
       throw new DOMException("Request cancelled", "AbortError");
@@ -109,6 +111,35 @@ async function request<T>(
     callerSignal?.removeEventListener("abort", abort);
   }
 }
+
+async function request<T>(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = 25_000,
+): Promise<T> {
+  const response = await send(path, init, timeoutMs);
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new ApiError(
+      "The server returned an unreadable response. Refresh and try again.",
+    );
+  }
+}
+
+async function pdf(path: string, signal?: AbortSignal): Promise<Blob> {
+  const response = await send(
+    path,
+    { signal, headers: { Accept: "application/pdf" } },
+    120_000,
+  );
+  const contentType = response.headers.get("Content-Type") || "";
+  if (!contentType.toLowerCase().startsWith("application/pdf")) {
+    throw new ApiError("The server did not return a PDF document.");
+  }
+  return response.blob();
+}
+
 const json = (method: string, body?: unknown): RequestInit => ({
   method,
   ...(body !== undefined
@@ -127,6 +158,9 @@ export const api = {
     request<CaseResponse>("/api/cases", json("POST", { name })),
   getCase: (id: string, signal?: AbortSignal) =>
     request<CaseResponse>(casePath(id), { signal }),
+  documentPdf: (caseId: string, documentId: string, signal?: AbortSignal) =>
+    pdf(`${casePath(caseId)}/documents/${segment(documentId)}`, signal),
+  samplePdf: (path: string, signal?: AbortSignal) => pdf(path, signal),
   loadSample: (id: string) =>
     request<CaseResponse>(
       `/api/samples/${segment(id)}/load`,

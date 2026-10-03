@@ -1,12 +1,10 @@
 import json
 import time
-from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from app.config import SAMPLES_DIR, Settings
-from app.main import create_app
+from app.main import _local_lessons, create_app
 from app.providers.interfaces import PrivacyResult
-from app.schemas.models import ReviewRequest
 
 
 @pytest.fixture
@@ -127,6 +125,16 @@ def test_aws_does_not_fallback():
         Settings(app_mode="aws", aws_region="", bedrock_model_id="").validate_mode()
 
 
+def test_agentcore_configuration_requires_memory_and_strategy_ids():
+    with pytest.raises(ValueError, match="must be supplied together"):
+        Settings(agentcore_memory_id="memory-id").validate_mode()
+    with pytest.raises(ValueError, match="must be supplied together"):
+        Settings(agentcore_memory_strategy_id="strategy-id").validate_mode()
+    whitespace = Settings(agentcore_memory_id=" ", agentcore_memory_strategy_id="\t")
+    whitespace.validate_mode()
+    assert _local_lessons(whitespace) is None
+
+
 def test_local_server_refuses_aws_mode(tmp_path):
     """A fully configured AWS mode must not start the local (demo-provider) server."""
     settings = Settings(
@@ -172,6 +180,30 @@ def test_second_worker_cannot_claim_active_lease(client):
     assert not claimed_by_b
     record = service.p.cases.get(case_id)
     assert record["job"]["lease_owner"] == "worker-A"
+
+
+def test_lease_renewal_prevents_recovery(client):
+    service = client.app.state.service
+    case_id = client.post("/api/cases", json={"name": "Renewal test"}).json()["id"]
+    run_id = "run-renewal-test"
+    service.p.cases.update(
+        case_id,
+        lambda r: r.update(
+            job=dict(
+                id=run_id,
+                case_id=case_id,
+                status="queued",
+                progress=0,
+                stage="Queued",
+                errors=[],
+                created_at="now",
+                updated_at="now",
+            )
+        ),
+    )
+    assert service.p.cases.claim_run(case_id, run_id, "worker-A", -1)
+    assert service.p.cases.renew_run(case_id, run_id, "worker-A", 300)
+    assert not service.p.cases.claim_run(case_id, run_id, "worker-B", 300)
 
 
 def test_expired_lease_allows_recovery(client):
@@ -237,10 +269,75 @@ def test_finish_run_rejects_wrong_owner(client):
     assert record["job"]["status"] == "processing"
 
 
+def test_stale_worker_cannot_update_reclaimed_run(client):
+    service = client.app.state.service
+    case_id = client.post("/api/cases", json={"name": "Stale worker test"}).json()["id"]
+    run_id = "run-stale-worker-test"
+    service.p.cases.update(
+        case_id,
+        lambda r: r.update(
+            job=dict(
+                id=run_id,
+                case_id=case_id,
+                status="queued",
+                progress=0,
+                stage="Queued",
+                errors=[],
+                created_at="now",
+                updated_at="now",
+            )
+        ),
+    )
+    assert service.p.cases.claim_run(case_id, run_id, "worker-A", -1)
+    assert service.p.cases.claim_run(case_id, run_id, "worker-B", 300)
+    assert not service._job(
+        case_id,
+        run_id,
+        owner="worker-A",
+        status="failed",
+        stage="Stale failure",
+        errors=["stale"],
+    )
+    job = service.p.cases.get(case_id)["job"]
+    assert job["status"] == "processing"
+    assert job["lease_owner"] == "worker-B"
+
+
+def test_job_update_reports_latest_optimistic_lock_attempt():
+    from types import SimpleNamespace
+    from app.services.cases import CaseService
+
+    class RetryingCases:
+        def update(self, case_id, mutate):
+            first = {
+                "job": {
+                    "id": "run-retry",
+                    "status": "processing",
+                    "lease_owner": "worker-A",
+                }
+            }
+            mutate(first)
+            latest = {
+                "job": {
+                    "id": "run-retry",
+                    "status": "processing",
+                    "lease_owner": "worker-B",
+                }
+            }
+            mutate(latest)
+            return latest
+
+    service = CaseService(SimpleNamespace(cases=RetryingCases()))
+    assert not service._job(
+        "case-retry",
+        "run-retry",
+        owner="worker-A",
+        status="failed",
+    )
+
+
 def test_presigned_upload_flow(client):
     """register_upload returns a presign response; complete_upload marks the doc uploaded."""
-    from app.providers.interfaces import ProviderError
-
     service = client.app.state.service
     case_id = client.post("/api/cases", json={"name": "Presign test"}).json()["id"]
 

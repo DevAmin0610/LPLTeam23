@@ -1,30 +1,38 @@
 # Workshop AWS connection checklist
 
-Do not create resources, deploy, bootstrap CDK, or change IAM until organizers authorize it.
+The initial `ClearPath` stack is deployed in account `033890317696`, region `us-east-1`, with CloudFormation status `UPDATE_COMPLETE`. Use this checklist before any redeployment, new resource creation, IAM change, provider change, or AgentCore runtime activation. The existing deployment is not blanket authorization for additional changes.
 
-Ask organizers for:
+## Verified deployment facts
 
-- [ ] AWS account and region; is cross-region model inference allowed?
-- [ ] Credential method: temporary access key/secret/session token, SSO, or an existing profile; session expiry/refresh instructions.
-- [ ] Allowed Bedrock model IDs and whether model access is enabled.
-- [ ] Required inference-profile ID or ARN (including destination model ARNs for IAM); `BEDROCK_MODEL_ID` may need a **workshop-provided model or inference-profile identifier**.
-- [ ] Existing guardrail ID and published version; who may change it?
-- [ ] Existing private S3 bucket, DynamoDB table/schema, worker Lambda, API endpoint/roles, KMS keys and networking constraints.
-- [ ] Permission boundaries, SCP restrictions, allowed Textract/Bedrock/S3/DynamoDB/Lambda actions and role-creation policy.
-- [ ] Whether creating any resources is permitted; CDK bootstrap role/account availability if permitted later.
-- [ ] Data-handling rules, approved synthetic-only scope, region residency, logging/retention and guardrail assessment restrictions.
-- [ ] Budget, service quotas, invocation limits and cleanup owner.
-- [ ] Authentication and per-case authorization requirements before any shared/public access.
-- [ ] Cognito user-pool/domain creation and email delivery limits; globally unique hosted-UI domain prefix.
-- [ ] CloudFront distribution/OAC and private frontend-bucket creation, cache invalidations, and cleanup policy.
-- [ ] AgentCore Memory availability, resource-creation permission, service quotas, retention/cost, encryption requirements, and exact data-plane IAM actions.
-- [ ] Whether AgentCore built-in semantic extraction/consolidation processing outside `us-east-1` is permitted. The CDK confirmation flag is an acknowledgement, not a technical region pin.
-- [ ] Existing AgentCore Memory ID/strategies/namespaces if organizers provide one; who owns records, revocation, deletion, and cleanup.
+- [x] Deployment account: `033890317696`
+- [x] Region: `us-east-1`
+- [x] Private CloudFront/S3 frontend published at https://d5ztmc348hleb.cloudfront.net
+- [x] Invite-only Cognito authorization code + PKCE sign-in works
+- [x] API Gateway requires a Cognito access token with `clearpath/review`
+- [x] Browser CORS preflight succeeds from the CloudFront origin
+- [x] API requests without an access token return `401`
+- [x] AgentCore Memory resource is provisioned
+- [ ] Complete presigned upload, worker analysis, findings, review, and resume path live-validated
+- [ ] Missing-scope behavior, logout/expiry behavior, and two-user ownership isolation live-validated
+- [ ] Provider failure behavior and CloudWatch privacy review completed
+- [ ] AgentCore runtime strategy ID reviewed and activated; currently it is **not configured**
 
-Fill `.env` from `.env.example` locally. Use the standard boto3 credential chain. For existing profiles, set `AWS_PROFILE` and `AWS_REGION`; for temporary credentials, configure them in the shell or AWS tooling **including the session token**, never in frontend code or committed files. Blank `AWS_PROFILE` permits environment/workload credentials. No credentials are required for demo mode.
+## Confirm before future AWS changes
 
-Required runtime settings: `AWS_REGION`, `BEDROCK_MODEL_ID`, `BEDROCK_GUARDRAIL_ID`, `BEDROCK_GUARDRAIL_VERSION`, `S3_DOCUMENT_BUCKET`, `DYNAMODB_CASES_TABLE`, `WORKER_LAMBDA_FUNCTION_NAME`. CORS uses `CORS_ALLOWED_ORIGINS`.
+- [ ] Explicit organizer/account-owner authorization for the proposed change
+- [ ] Temporary credential refresh/expiry procedure and cleanup owner
+- [ ] Permission-boundary and SCP restrictions
+- [ ] Exact approved Bedrock model or inference-profile identifier and destination model ARNs
+- [ ] Guardrail ownership and approved published version
+- [ ] S3, DynamoDB, Lambda, SQS, Textract, Bedrock, Cognito, CloudFront, and AgentCore quotas/costs
+- [ ] Synthetic-only data handling, region residency, logging, and retention requirements
+- [ ] AgentCore built-in semantic processing region constraints; the CDK confirmation flag does not pin processing to `us-east-1`
+- [ ] Provenance, policy applicability, revocation, access isolation, and deletion controls before shared-memory activation
 
-The CDK stack now composes the existing AWS handlers and creates Cognito, CloudFront, and AgentCore Memory resources. Deployment is still gated: the frontend does not yet implement OAuth/PKCE or attach access tokens, the backend does not enforce case ownership from authenticated claims, and the backend still uses DynamoDB review history rather than AgentCore Memory. Do not expose it publicly or claim live semantic learning until those application integrations are implemented and tested.
+Use the standard boto3/AWS CLI credential chain outside this repository. Never place credentials in `.env`, frontend variables, source files, CDK context, shell history shared with others, or CloudFormation parameters. No AWS credentials are required for local demo mode.
 
-See [the deployment runbook](aws-deployment-runbook.md) for context keys, synthesis review, authorized deployment, website publication, smoke tests, and retained-resource cleanup. No AWS errors may be replaced by demo findings.
+Required AWS runtime settings are `AWS_REGION`, `BEDROCK_MODEL_ID`, `BEDROCK_GUARDRAIL_ID`, `BEDROCK_GUARDRAIL_VERSION`, `S3_DOCUMENT_BUCKET`, `DYNAMODB_CASES_TABLE`, and `WORKER_LAMBDA_FUNCTION_NAME`; CORS uses `CORS_ALLOWED_ORIGINS`.
+
+The AgentCore lesson adapter can run only when both a Memory ID and concrete semantic strategy ID are supplied. In the current deployment, the Memory resource is provisioned but `agentcoreMemoryStrategyId` is not configured; Lambda has no AgentCore data-plane access, and no active AgentCore learning should be claimed. DynamoDB remains authoritative for review-memory eligibility and counts.
+
+See [the deployment runbook](aws-deployment-runbook.md) for controlled synthesis, diff review, authorized updates, frontend publication, smoke tests, and retained-resource cleanup. AWS failures must never be replaced with demo findings.

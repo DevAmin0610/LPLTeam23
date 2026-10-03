@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     def validate_mode(self, *, worker: bool = False) -> None:
         if self.app_mode not in {"demo", "aws"}:
             raise ValueError("APP_MODE must be demo or aws.")
+        if bool(self.agentcore_memory_id.strip()) != bool(
+            self.agentcore_memory_strategy_id.strip()
+        ):
+            raise ValueError(
+                "AGENTCORE_MEMORY_ID and AGENTCORE_MEMORY_STRATEGY_ID must be supplied together."
+            )
         if self.app_mode == "aws":
             required = [
                 "aws_region",

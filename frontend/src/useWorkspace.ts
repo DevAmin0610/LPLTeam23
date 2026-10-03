@@ -67,6 +67,13 @@ export function useWorkspace() {
   }, [configAttempt]);
 
   useEffect(() => {
+    if (!config) return;
+    if (config.mode !== "demo") {
+      setSamples([]);
+      setSamplesError("");
+      setSamplesLoading(false);
+      return;
+    }
     const controller = new AbortController();
     setSamplesLoading(true);
     setSamplesError("");
@@ -82,7 +89,7 @@ export function useWorkspace() {
         if (!controller.signal.aborted) setSamplesLoading(false);
       });
     return () => controller.abort();
-  }, [samplesAttempt]);
+  }, [config, samplesAttempt]);
 
   useEffect(() => {
     const controller = new AbortController();

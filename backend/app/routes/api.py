@@ -217,5 +217,8 @@ def memory_summary(request: Request):
 
 @router.post("/memory/reset", response_model=MemorySummary, dependencies=SIGNED_IN)
 def reset_memory(request: Request):
-    # For rehearsals. Any signed-in user may reset; there are no admin roles yet.
+    # Rehearsal convenience only. AWS mode has no administrator role yet, so a
+    # normal signed-in reviewer must not be able to erase shared lesson history.
+    if request.app.state.settings.app_mode != "demo":
+        raise CaseError("Memory reset is available in demo mode only.", 403)
     return request.app.state.service.reset_memory()

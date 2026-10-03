@@ -20,12 +20,12 @@ npm ci
 npm --prefix frontend ci
 ```
 
-Requirements: Python 3.11+, Node.js 22.12+, npm.
+Requirements: Python 3.12+, Node.js 22.12+ (or 24), npm.
 
 Check the backend:
 
 ```sh
-npm run test:backend    # expect 13 passed
+npm run test:backend
 ```
 
 ## 2. Start it
@@ -49,14 +49,14 @@ npm --prefix frontend run dev
 
 Open **http://localhost:5173** (use `localhost`, not `127.0.0.1`).
 
-### Option B: on the workshop machine (CloudFront)
+### Option B: local demo through a workshop port-proxy URL
 
-The workshop serves each port under a path, like `https://<id>.cloudfront.net/ports/5173/`. The dev server can't run under a path, so build the site with relative paths and serve the build instead.
+This is separate from the deployed Cognito-protected frontend at https://d5ztmc348hleb.cloudfront.net. The workshop serves each local port under a path, like `https://<id>.cloudfront.net/ports/5173/`. The dev server can't run under a path, so build the site with relative paths and serve the build instead.
 
 Replace `<id>` with your workshop address (the part before `.cloudfront.net` in your browser bar):
 
 ```sh
-echo "VITE_API_BASE_URL=https://<id>.cloudfront.net/ports/8000" > frontend/.env
+printf 'VITE_AUTH_MODE=demo\nVITE_API_BASE_URL=https://<id>.cloudfront.net/ports/8000\n' > frontend/.env
 npm --prefix frontend run build -- --base=./
 cd frontend
 npx vite preview --host 0.0.0.0 --port 5173 --strictPort
@@ -89,7 +89,7 @@ Other samples to try: **Complete and consistent** (no findings) and **Missing in
 
 - `backend/app/services/rules.py`: each finding gets a **pattern**, the kind of finding with no values in it (e.g. `ADDRESS_REVIEW:formatting_only` vs `ADDRESS_REVIEW:different`).
 - `backend/app/services/memory.py`: stores approved decisions per pattern and builds the history and hint shown on each finding.
-- Storage: a `memory` table in the local SQLite file in demo mode; one item (`memory#v1`) in the existing DynamoDB table in AWS mode. No new AWS resources.
+- Storage: a `memory` table in the local SQLite file in demo mode; one item (`memory#v1`) in DynamoDB in AWS mode. A separate AgentCore Memory resource is provisioned in the deployed stack, but runtime ingestion/retrieval is inactive because no strategy ID is configured.
 - API: `GET /api/memory` (what's been learned), `POST /api/memory/reset` (clear it). The review endpoint takes `"remember": true`.
 - Sample PDFs live in `backend/app/samples/`, so the Lambda package includes them. Regenerate with `.venv/bin/python demo/generate.py`.
 

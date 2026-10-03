@@ -30,7 +30,7 @@ function fixture(overrides: Partial<ClearPathConfig> = {}) {
   return Template.fromStack(stack);
 }
 
-test("stack protects every API route with Cognito access-token scope", () => {
+test("stack protects application routes and leaves only CORS preflight unauthenticated", () => {
   const template = fixture();
   template.hasResourceProperties("AWS::ApiGatewayV2::Authorizer", {
     AuthorizerType: "JWT",
@@ -44,6 +44,11 @@ test("stack protects every API route with Cognito access-token scope", () => {
     RouteKey: "$default",
     AuthorizationType: "JWT",
     AuthorizationScopes: ["clearpath/review"],
+  });
+  template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
+    RouteKey: "OPTIONS /{proxy+}",
+    AuthorizationType: "NONE",
+    AuthorizationScopes: Match.absent(),
   });
   assert.match(JSON.stringify(template.toJSON()), /cognito-idp.*us-east-1/);
 });
@@ -70,7 +75,7 @@ test("browser auth is invite-only, secretless, and authorization-code based", ()
   assert.match(JSON.stringify(template.toJSON()), /clearpath.*review/);
 });
 
-test("semantic Memory is provisioned but runtime roles cannot ingest or retrieve", () => {
+test("semantic Memory is provisioned but runtime access stays opt-in", () => {
   const template = fixture();
   template.hasResourceProperties("AWS::BedrockAgentCore::Memory", {
     EventExpiryDuration: 7,
@@ -83,6 +88,48 @@ test("semantic Memory is provisioned but runtime roles cannot ingest or retrieve
     "bedrock-agentcore:DeleteMemoryRecord",
   ]) {
     assert.equal(rendered.includes(action), false);
+  }
+  assert.equal(rendered.includes("AGENTCORE_MEMORY_ID"), false);
+});
+
+test("a strategy ID wires Memory into both Lambdas with scoped runtime access", () => {
+  const strategyId = "ApprovedLessons-a1b2c3d4e5";
+  const template = fixture({ agentcoreMemoryStrategyId: strategyId });
+  template.resourcePropertiesCountIs(
+    "AWS::Lambda::Function",
+    {
+      Environment: {
+        Variables: Match.objectLike({
+          AGENTCORE_MEMORY_ID: Match.anyValue(),
+          AGENTCORE_MEMORY_STRATEGY_ID: strategyId,
+        }),
+      },
+    },
+    2,
+  );
+  const rendered = JSON.stringify(template.toJSON());
+  assert.equal(rendered.includes("bedrock-agentcore:CreateEvent"), true);
+  assert.equal(
+    rendered.includes("bedrock-agentcore:RetrieveMemoryRecords"),
+    true,
+  );
+  assert.equal(rendered.includes("bedrock-agentcore:DeleteEvent"), false);
+  assert.equal(
+    rendered.includes("bedrock-agentcore:DeleteMemoryRecord"),
+    false,
+  );
+});
+
+test("runtime Memory requires enabled, region-confirmed semantic processing", () => {
+  const strategyId = "ApprovedLessons-a1b2c3d4e5";
+  for (const overrides of [
+    { enableSemanticMemory: false },
+    { memoryProcessingRegionConfirmed: false },
+  ]) {
+    assert.throws(
+      () => fixture({ agentcoreMemoryStrategyId: strategyId, ...overrides }),
+      /requires enabled, region-confirmed semantic Memory/,
+    );
   }
 });
 
@@ -99,11 +146,22 @@ test("stack rejects deployment outside us-east-1", () => {
   );
 });
 
+test("context rejects plaintext non-loopback frontend origins", () => {
+  const app = new App({
+    context: { frontendOrigins: JSON.stringify(["http://example.com"]) },
+  });
+  assert.throws(
+    () => readConfig(app),
+    /exact HTTPS origins \(or loopback HTTP origins\)/,
+  );
+});
+
 test("context defaults Memory and semantic extraction on but requires confirmation", () => {
   const app = new App({ context: {} });
   const parsed = readConfig(app);
   assert.equal(parsed.enableSemanticMemory, true);
   assert.equal(parsed.memoryProcessingRegionConfirmed, false);
   assert.equal(parsed.memoryEventExpiryDays, 7);
+  assert.equal(parsed.agentcoreMemoryStrategyId, undefined);
   assert.equal("allowUnauthenticatedApi" in parsed, false);
 });

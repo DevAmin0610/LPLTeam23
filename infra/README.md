@@ -9,7 +9,7 @@ TypeScript CDK for the hackathon AWS deployment. The stack is restricted to `us-
 - AgentCore Memory, with semantic extraction enabled by default after an explicit processing-region confirmation;
 - a private frontend bucket behind CloudFront Origin Access Control.
 
-Nothing in this directory deploys automatically. Do not bootstrap or deploy until the temporary account owner authorizes resource creation, IAM roles, Cognito, CloudFront, Bedrock, and AgentCore Memory.
+The `ClearPath` stack is deployed in account `033890317696`, `us-east-1`, with CloudFormation status `UPDATE_COMPLETE`; the frontend is published at https://d5ztmc348hleb.cloudfront.net. Nothing in this directory deploys automatically. Do not bootstrap, redeploy, change IAM, activate AgentCore runtime access, or create additional resources without authorization.
 
 ## Local validation
 
@@ -65,13 +65,13 @@ There is deliberately no unauthenticated-API switch.
 
 ## Authentication boundary
 
-The user pool is admin/invite-only. Its browser client has no secret and uses OAuth authorization code flow (the frontend must use PKCE). API Gateway requires an access token containing `clearpath/review` on every route.
+The user pool is admin/invite-only. Its browser client has no secret and uses OAuth authorization code flow with PKCE. The frontend verifies callback state, exchanges the code with the PKCE verifier, handles token expiry/logout, and sends the access token as `Authorization: Bearer ...`. API Gateway requires that access token to contain `clearpath/review` on every route.
 
-Infrastructure authentication is not case authorization. Before shared use, the backend must derive a stable principal from verified API Gateway claims, store ownership, and enforce it on every case, document, finding, memory, and reset operation. The current frontend also needs OAuth/PKCE token handling and must attach the access token as `Authorization: Bearer ...`; until that is implemented, the protected deployed API is intentionally unusable from the current UI.
+Infrastructure authentication is not case authorization. The backend derives a stable principal from verified API Gateway claims, stores case ownership and enforces it on case/document/finding routes. Memory remains shared across the invited hackathon users; keep the hosted demo synthetic and do not treat that namespace as multi-tenant isolation.
 
 ## AgentCore Memory boundary
 
-The stack provisions semantic Memory because it is part of the intended AWS demo, but it grants the API and worker **no AgentCore data-plane permissions yet**. The backend still uses `DynamoMemoryStore`; provisioning is not active integration.
+The deployed stack includes semantic Memory, but no runtime strategy ID is configured. It therefore grants the API and worker **no AgentCore data-plane permissions**. The backend continues to use `DynamoMemoryStore`; provisioning is not active integration.
 
 Before calling `grantIngestion`, `grantRetrieval`, or `grantRevocation` from `lib/memory.ts`, implement and test an application workflow that:
 
@@ -90,11 +90,13 @@ AWS documents that built-in semantic processing may use other US regions. `memor
 
 CDK creates only the private bucket, CloudFront distribution, OAC, SPA rewrite function, and outputs. It intentionally does not run the frontend build or upload files from a deployment custom resource.
 
-After an authorized stack deployment:
+To build or republish the frontend after an authorized deployment or update:
 
-1. Build the frontend with the deployed API/auth settings once frontend OAuth support exists.
+1. Build the frontend with `VITE_AUTH_MODE=cognito` and the deployed API URL, Cognito domain, client ID, CloudFront URL and `openid email clearpath/review` scope.
 2. Upload `frontend/dist/` with `aws s3 sync`, using the `WebsiteBucketName` stack output.
 3. Invalidate `/index.html` and any changed non-hashed files using the `WebsiteDistributionId` output.
 4. Open `WebsiteUrl` and verify HTTPS, sign-in, authenticated API calls, logout, SPA refresh, and that `/api` is not proxied by CloudFront.
+
+The current publication has verified HTTPS, Cognito sign-in, authenticated frontend/API connectivity, CORS preflight handling, and unauthenticated `401` behavior. The full case upload/analyze/review workflow remains to be validated.
 
 Do not put AWS credentials, a Cognito client secret, documents, or runtime configuration secrets in the frontend bundle. See `../docs/aws-deployment-runbook.md` for gated commands and smoke tests.

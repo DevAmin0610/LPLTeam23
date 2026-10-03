@@ -1,16 +1,35 @@
-# ClearPath — local-first team starter
+# ClearPath — reviewer-assisted document checks
 
-A runnable **starter**, deliberately stopped short of the full MVP for frontend/backend/infrastructure team handoff. Independent LPL Financial hackathon prototype; **not endorsed by LPL, not actual LPL policy, and not a regulatory compliance guarantee**. Use synthetic data only.
+ClearPath reviews synthetic transfer-document packets, identifies missing information and discrepancies, presents source evidence, and lets a human reviewer accept or dismiss each finding.
 
-## Product direction
+## Current status
 
-ClearPath is intended to turn **validated reviewer rationale into reusable institutional knowledge**: approved, sanitized lessons from prior document reviews could help explain recurring issues and suggest better next steps without fine-tuning the model. AgentCore Memory is a **planned proof of concept, not an implemented integration**. Lessons are advisory; source evidence and versioned rules remain authoritative.
+ClearPath supports two deliberately separate modes:
 
-Read [the product direction](docs/product-direction.md) for the feedback loop, privacy boundaries, and evaluation scope. The current starter stores review decisions and notes but does not learn from them or send them to memory.
+- **Local demo mode:** credential-free, network-free operation with committed synthetic PDFs, SQLite, local file storage, deterministic extraction/rules, and simulated explanation templates. It makes no AWS calls.
+- **Deployed AWS mode:** invite-only Cognito authorization code + PKCE, a JWT-protected HTTP API, per-user case ownership, private S3 document and website buckets, DynamoDB case state, API/worker Lambdas, Textract/Guardrails/Bedrock adapters, CloudFront hosting, and a provisioned AgentCore Memory resource.
 
-## Run locally
+The `ClearPath` CloudFormation stack is deployed in account `033890317696`, `us-east-1`, with status `UPDATE_COMPLETE`. The authenticated frontend is published at **https://d5ztmc348hleb.cloudfront.net**. Cognito sign-in, HTTPS hosting, JWT-protected frontend/API connectivity, CORS preflight behavior, and unauthenticated API rejection (`401`) have been live-verified.
 
-Requirements: Python 3.12+, Node.js 22.12+ (or 24), npm. From the repository root:
+The complete AWS upload → analyze → review workflow, provider failure behavior, two-user ownership isolation, and operational/privacy checks still require live end-to-end validation before broader use. This is hackathon-ready, not production-ready.
+
+## Features
+
+- React/Vite/TypeScript review workspace with Cognito and local-demo authentication modes.
+- Case creation, PDF upload, durable analysis status, polling, source-document viewing, and resumable case IDs.
+- Findings for missing fields, identifier mismatches, address differences, and unsupported/review-required documents.
+- Human accept/dismiss decisions, optional notes, evidence navigation, and a correction checklist.
+- Privacy-safe model-input preview containing comparison outcomes rather than source identifiers.
+- Explicit **Remember this decision** approval that stores only a finding pattern and decision—not reviewer notes or source values.
+- Versioned deterministic sample rules and conservative extraction for supported synthetic, text-based PDFs.
+- Fail-closed privacy checks; AWS failures never fall back to fabricated demo results.
+- Invite-only Cognito, scoped access tokens, server-side case ownership, private S3, retained DynamoDB, and CloudFront Origin Access Control.
+- AgentCore Memory provisioning and optional adapter wiring. The deployed Memory resource is **provisioned but not active** because no runtime semantic strategy ID is configured; DynamoDB remains authoritative for review-memory counts.
+- Twelve committed synthetic PDFs across four reusable local demo packets, with a reproducible generator.
+
+## Run the local demo
+
+Requirements: Python 3.12+, Node.js 22.12+ (or 24), and npm.
 
 ```sh
 python -m venv .venv
@@ -21,33 +40,54 @@ npm --prefix frontend ci
 npm --prefix infra ci
 ```
 
-Terminal 1, repository root:
+Terminal 1, from the repository root:
 
 ```sh
 .venv/bin/uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-Terminal 2, repository root:
+Terminal 2:
 
 ```sh
 npm --prefix frontend run dev
 ```
 
-Open **http://localhost:5173** (use localhost, not 127.0.0.1, for the configured CORS origin). API docs: http://localhost:8000/docs. Frontend defaults to `VITE_API_BASE_URL=http://localhost:8000`; override in `frontend/.env` if needed. Run just **one backend process/worker**, without reload, for the local job queue.
+Open **http://localhost:5173**. Use `localhost`, not `127.0.0.1`, for the configured browser origin. API docs are at http://localhost:8000/docs. The local frontend uses demo authentication (`reviewer` / `LPLTeam23`). Run one backend process without reload because the local job queue is in-process.
 
-Select a sample and **Load sample case**. This uploads the committed synthetic PDFs into local storage, queues analysis, and polls for actual results. Inspect a PDF and sanitized evidence, accept/dismiss findings, and view the correction checklist. You can also create a case and upload PDFs individually. One PDF per type; create a new case to replace a packet.
+Select a synthetic packet and choose **Load sample case**, or create a case and upload one supported PDF per document type. Demo mode stores state in gitignored `local-data/` and never initializes AWS clients.
 
-## Implemented local slice
+See [`DEMO.md`](DEMO.md) for the guided local walkthrough.
 
-- React/Vite/TypeScript review screen, upload, samples, source viewer, polling, review notes, checklist, model-input preview.
-- FastAPI/Pydantic API with shared contracts, SQLite persistence and gitignored `local-data/uploads/`.
-- Background executor, durable job status, startup interruption recovery; no AWS calls in demo mode.
-- Real `pypdf` extraction and versioned sample rules for missing fields, SSN/account mismatches, and address differences.
-- Protected comparisons before sanitization; deterministic explanation templates; input/output privacy checks that fail closed.
-- Nine downloadable, synthetic PDFs across three packets; reproducible generator.
-- Provider ports, AWS adapters/composition and Lambda handlers; CDK resources for the runtime, Cognito, AgentCore Memory and CloudFront. **No resources have been deployed or live-validated.**
+## Deployed AWS mode
 
-## Checks and formatting
+The deployed frontend uses build-time public identifiers for API Gateway and Cognito; it contains no AWS credentials or Cognito client secret. Access is invite-only. AWS mode hides local sample-loading controls and requires users to create a synthetic case and use the presigned upload flow.
+
+Current verified deployment facts:
+
+- CloudFormation stack: `ClearPath` / `UPDATE_COMPLETE`
+- Region: `us-east-1`
+- Frontend: https://d5ztmc348hleb.cloudfront.net
+- API: Cognito JWT protected with `clearpath/review`
+- HTTP → HTTPS redirect: verified
+- Cognito authorization-code + PKCE sign-in: verified
+- Browser CORS preflight: verified
+- API request without access token: `401`, verified
+- AgentCore Memory: resource provisioned; Lambda runtime ingestion/retrieval inactive without `agentcoreMemoryStrategyId`
+
+Follow [`docs/aws-deployment-runbook.md`](docs/aws-deployment-runbook.md) for controlled updates, publication, smoke checks, and cleanup. Deployment, IAM changes, new resources, or AgentCore runtime activation still require explicit authorization.
+
+## Architecture and contracts
+
+- Backend schemas: `backend/app/schemas/models.py`
+- Frontend types: `frontend/src/types.ts`
+- API contract: [`docs/api-contract.md`](docs/api-contract.md)
+- Product and memory boundaries: [`docs/product-direction.md`](docs/product-direction.md)
+- Current handoff/status: [`docs/handoff.md`](docs/handoff.md)
+- AWS infrastructure: [`infra/README.md`](infra/README.md)
+
+Business rules live in shared services rather than HTTP handlers, Lambda handlers, UI code, or storage adapters. Demo startup must never import or initialize AWS clients.
+
+## Validation and formatting
 
 ```sh
 npm run format
@@ -55,24 +95,25 @@ npm run format:check
 npm run test:backend
 npm run test:frontend
 npm run build
+npm --prefix infra test
 ```
 
-Backend tests include an in-process HTTP end-to-end smoke path (sample loading, analysis polling, document retrieval and saved reviews), fixture findings, privacy failure and retry behavior. There is no automated browser E2E suite yet.
+Backend tests include an in-process local HTTP smoke path covering sample loading, analysis polling, document retrieval, reviews, privacy failures, and retry behavior. Infrastructure assertions cover authentication, private hosting, AgentCore provisioning, and the unauthenticated CORS preflight exception. There is no automated browser end-to-end suite yet.
 
-To regenerate the committed fixtures:
+Regenerate the committed synthetic fixtures with:
 
 ```sh
 .venv/bin/python demo/generate.py
 ```
 
-## Boundaries and handoff
+## Boundaries
 
-Read [the handoff](docs/handoff.md), [API contract](docs/api-contract.md), and [AWS checklist](docs/aws-connection-checklist.md).
-
-- Demo extraction supports small, single-page, unencrypted **text-based** PDFs with exact sample field labels. Scanned/image-containing, unreadable, multipage and unsupported layouts require manual review. Max 5 MB/file.
-- Local masking supports the synthetic identifier formats only; **not production-grade PII detection**. The raw synthetic PDF is deliberately visible in the source viewer; excerpts and model inputs omit values. User-entered case names and review notes are not privacy-filtered: never put sensitive information in them.
-- Local demo mode has no authentication. The AWS infrastructure defines invite-only Cognito and JWT-protected API Gateway access, but the frontend OAuth/PKCE flow and backend case ownership checks are not implemented. Authentication, UUIDs and CORS are not case authorization; do not expose the deployment publicly until those controls, upload/body limits, security review and operational controls are complete.
-- Standard AWS credential chain will be used by the draft lazy adapters. Keep temporary credentials/profile configuration outside this repository. No AWS credentials belong in the frontend.
-- `APP_MODE=aws` validates required settings and uses the AWS composition; it never silently falls back to demo.
-- AgentCore Memory provisioning is implemented, but the backend still uses its DynamoDB review-history store. Do not claim live semantic learning until approved/sanitized ingestion and retrieval are integrated.
-- No resources deployed, no IAM changes, no CDK bootstrap. Follow `docs/aws-deployment-runbook.md` only after workshop authorization and all release gates are satisfied.
+- Supported demo inputs are small, single-page, unencrypted, text-based PDFs using the expected synthetic labels; maximum 5 MB per file.
+- Scanned, image-containing, unreadable, multipage, encrypted, or unsupported layouts require manual review.
+- Local masking recognizes only the synthetic identifier formats and is not production-grade PII detection.
+- Raw synthetic PDFs are visible in the source viewer; excerpts and model inputs omit source values.
+- Case names and reviewer notes are not privacy-filtered. Never put sensitive information in them.
+- Local demo authentication is a frontend-only gate and must never be publicly exposed.
+- Shared review memory is not tenant-isolated. Complete provenance, policy applicability, revocation, retention, and role-based lesson approval remain future work.
+- AgentCore lessons are advisory only and must never change deterministic findings, waive policy, or approve cases.
+- Do not claim measured accuracy improvement, regulatory compliance, official endorsement, or active AgentCore learning without supporting validation.
