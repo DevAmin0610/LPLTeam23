@@ -466,8 +466,8 @@ def test_address_explanation_matches_pattern(client):
     moved = address_finding(load(client, "conflicting"))
     assert same["pattern"] == "ADDRESS_REVIEW:formatting_only"
     assert "only in formatting" in same["explanation"]
-    assert moved["pattern"] == "ADDRESS_REVIEW:different"
-    assert "different locations" in moved["explanation"]
+    assert moved["pattern"] == "ADDRESS_REVIEW:street_mismatch"
+    assert "street address differs" in moved["explanation"]
     assert "formatting" not in moved["explanation"]
 
 

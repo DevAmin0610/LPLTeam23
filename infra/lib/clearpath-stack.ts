@@ -516,8 +516,8 @@ export class ClearPathStack extends Stack {
     );
     workerRole.addToPolicy(
       new iam.PolicyStatement({
-        // DetectDocumentText does not support resource-level IAM permissions.
-        actions: ["textract:DetectDocumentText"],
+        // AnalyzeDocument does not support resource-level IAM permissions.
+        actions: ["textract:AnalyzeDocument"],
         resources: ["*"],
       }),
     );

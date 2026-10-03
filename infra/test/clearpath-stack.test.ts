@@ -53,6 +53,12 @@ test("stack protects application routes and leaves only CORS preflight unauthent
   assert.match(JSON.stringify(template.toJSON()), /cognito-idp.*us-east-1/);
 });
 
+test("worker uses structured Textract form analysis only", () => {
+  const rendered = JSON.stringify(fixture().toJSON());
+  assert.equal(rendered.includes("textract:AnalyzeDocument"), true);
+  assert.equal(rendered.includes("textract:DetectDocumentText"), false);
+});
+
 test("browser auth is invite-only, secretless, and authorization-code based", () => {
   const template = fixture();
   template.hasResource("AWS::Cognito::UserPool", {

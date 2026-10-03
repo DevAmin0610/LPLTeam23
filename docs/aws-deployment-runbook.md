@@ -67,7 +67,7 @@ Memory provisioning and runtime activation are deliberately separate. Without `a
 Review `infra/cdk.out/ClearPath.template.json` and the asset manifest. Check especially:
 
 - no wildcard Bedrock model/guardrail resources;
-- Textract’s unavoidable `*` resource is action-limited to `DetectDocumentText`;
+- Textract’s unavoidable `*` resource is action-limited to `AnalyzeDocument` for structured form extraction;
 - Lambda roles have only required S3, DynamoDB, Lambda, Bedrock, Textract and log permissions;
 - no Lambda has AgentCore ingestion/retrieval permissions unless `agentcoreMemoryStrategyId` was explicitly supplied;
 - when runtime Memory is enabled, the API has ingestion/retrieval, the worker has retrieval, and neither role has deletion;

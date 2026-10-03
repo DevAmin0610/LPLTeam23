@@ -108,7 +108,7 @@ Regenerate the committed synthetic fixtures with:
 
 ## Boundaries
 
-- Supported demo inputs are small, single-page, unencrypted, text-based PDFs using the expected synthetic labels; maximum 5 MB per file.
+- Supported demo inputs are small, single-page, unencrypted, text-based PDFs using canonical or versioned synthetic label aliases; maximum 5 MB per file.
 - Scanned, image-containing, unreadable, multipage, encrypted, or unsupported layouts require manual review.
 - Local masking recognizes only the synthetic identifier formats and is not production-grade PII detection.
 - Raw synthetic PDFs are visible in the source viewer; excerpts and model inputs omit source values.

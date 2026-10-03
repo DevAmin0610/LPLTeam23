@@ -12,6 +12,46 @@
     ],
     "account_statement": ["Client Name", "Address", "Account Number"]
   },
+  "aliases": {
+    "client_profile": {
+      "Client Name": ["Client Name", "Customer Name", "Account Holder"],
+      "SSN": ["SSN", "Social Security Number"],
+      "Address": ["Address", "Mailing Address", "Residential Address"]
+    },
+    "transfer_application": {
+      "Client Name": ["Client Name", "Customer Name", "Account Holder"],
+      "SSN": ["SSN", "Social Security Number"],
+      "Address": ["Address", "Mailing Address", "Residential Address"],
+      "Account Number": [
+        "Account Number",
+        "Account No",
+        "Acct Number",
+        "Source Account Number",
+        "Current Account Number",
+        "Delivering Account Number"
+      ],
+      "Receiving Account": [
+        "Receiving Account",
+        "Receiving Account Number",
+        "Destination Account Number"
+      ]
+    },
+    "account_statement": {
+      "Client Name": [
+        "Client Name",
+        "Customer Name",
+        "Account Holder",
+        "Account Holder Name"
+      ],
+      "Address": ["Address", "Mailing Address", "Statement Address"],
+      "Account Number": [
+        "Account Number",
+        "Account No",
+        "Acct Number",
+        "Acct No"
+      ]
+    }
+  },
   "comparisons": [
     {
       "id": "SSN_MATCH",

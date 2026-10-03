@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
+
 from app.providers.interfaces import Extraction
 
 POLICY = json.loads(
@@ -16,6 +17,8 @@ POLICY = json.loads(
 # abbreviation") so reviewer decisions can be remembered across cases. Patterns
 # are fixed strings built from rule IDs, document types and field labels. They
 # never contain field values, names, identifiers or document IDs.
+
+MIN_FIELD_CONFIDENCE = 0.85
 
 _STREET_WORDS = {
     "st": "street",
@@ -41,7 +44,12 @@ _STREET_WORDS = {
 
 PATTERN_LABELS = {
     "ADDRESS_REVIEW:formatting_only": "Address differs only by abbreviations or punctuation",
-    "ADDRESS_REVIEW:different": "Address is a different location",
+    "ADDRESS_REVIEW:postal_code_mismatch": "ZIP or postal code differs between documents",
+    "ADDRESS_REVIEW:state_mismatch": "State differs between documents",
+    "ADDRESS_REVIEW:city_mismatch": "City differs between documents",
+    "ADDRESS_REVIEW:street_mismatch": "Street address differs between documents",
+    "ADDRESS_REVIEW:multiple_components_mismatch": "Multiple address components differ",
+    "ADDRESS_REVIEW:different": "Address could not be matched component by component",
     "SSN_MATCH:transposed_digits": "SSN has two neighboring digits swapped",
     "SSN_MATCH:different": "SSN is a different number",
     "ACCOUNT_MATCH:formatting_only": "Account number differs only by dashes or spaces",
@@ -66,9 +74,85 @@ def pattern_label(pattern: str) -> str:
     return pattern.replace("_", " ").replace(":", " · ")
 
 
+def _label_key(value: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", value.casefold()).split())
+
+
+def _field_aliases(document_type: str) -> dict[str, str]:
+    aliases = {}
+    configured = POLICY.get("aliases", {}).get(document_type, {})
+    for canonical in POLICY["required"][document_type]:
+        for alias in configured.get(canonical, [canonical]):
+            key = _label_key(alias)
+            previous = aliases.get(key)
+            if previous and previous != canonical:
+                raise ValueError(f"Ambiguous field alias in policy: {alias}")
+            aliases[key] = canonical
+        aliases[_label_key(canonical)] = canonical
+    return aliases
+
+
+def parse_fields(
+    document_type: str, extraction: Extraction
+) -> tuple[dict[str, str], set[str], dict[str, dict[str, float] | None]]:
+    """Map extracted labels to canonical policy fields without guessing."""
+    aliases = _field_aliases(document_type)
+    candidates = [
+        (field.label, field.value, field.confidence, field.bounding_box)
+        for field in extraction.fields
+    ]
+    for line in extraction.lines:
+        parts = re.split(r"\s*[:=]\s*", line.text, maxsplit=1)
+        if len(parts) == 2:
+            candidates.append((parts[0], parts[1], line.confidence, line.bounding_box))
+
+    fields: dict[str, str] = {}
+    uncertain: set[str] = set()
+    boxes: dict[str, dict[str, float] | None] = {}
+    for label, value, confidence, box in candidates:
+        canonical = aliases.get(_label_key(label))
+        if not canonical:
+            continue
+        value = value.strip()
+        if canonical in fields:
+            if fields[canonical].casefold() != value.casefold():
+                uncertain.add(canonical)
+            continue
+        if confidence < MIN_FIELD_CONFIDENCE:
+            uncertain.add(canonical)
+        fields[canonical] = value
+        boxes[canonical] = box
+    return fields, uncertain, boxes
+
+
+def _valid_account_number(value: str) -> bool:
+    """Accept bounded synthetic identifiers without assuming institution prefixes."""
+    compact = re.sub(r"[\s-]", "", value)
+    return (
+        4 <= len(compact) <= 32
+        and compact.isalnum()
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 -]*[A-Za-z0-9]", value) is not None
+    )
+
+
 def _address_key(value: str) -> str:
     words = re.sub(r"[^\w\s]", " ", value.casefold()).split()
     return " ".join(_STREET_WORDS.get(w, w) for w in words)
+
+
+def _address_components(value: str) -> dict[str, str] | None:
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    if len(parts) < 3:
+        return None
+    region = _address_key(parts[-1]).split()
+    if len(region) < 2 or not re.fullmatch(r"\d{5}(?:-\d{4})?", region[-1]):
+        return None
+    return {
+        "street": _address_key(parts[0]),
+        "city": _address_key(" ".join(parts[1:-1])),
+        "state": region[-2],
+        "postal_code": region[-1],
+    }
 
 
 def _transposed(a: str, b: str) -> bool:
@@ -86,8 +170,22 @@ def _transposed(a: str, b: str) -> bool:
 def comparison_pattern(rule_id: str, field: str, values: list[str]) -> str:
     """Classify a mismatch on ORIGINAL values; only the label leaves this function."""
     if field == "Address":
-        same = len({_address_key(v) for v in values}) == 1
-        return f"{rule_id}:{'formatting_only' if same else 'different'}"
+        if len({_address_key(v) for v in values}) == 1:
+            return f"{rule_id}:formatting_only"
+        components = [_address_components(value) for value in values]
+        if any(component is None for component in components):
+            return f"{rule_id}:different"
+        complete = [component for component in components if component is not None]
+        changed = [
+            key
+            for key in ("street", "city", "state", "postal_code")
+            if len({component[key] for component in complete}) > 1
+        ]
+        if len(changed) == 1:
+            return f"{rule_id}:{changed[0]}_mismatch"
+        if changed:
+            return f"{rule_id}:multiple_components_mismatch"
+        return f"{rule_id}:different"
     if field == "SSN":
         digits = [re.sub(r"\D", "", v) for v in values]
         unique = sorted(set(digits))
@@ -105,8 +203,16 @@ def difference_note(pattern: str) -> str:
         return "The values differ only in formatting, such as abbreviations, punctuation or dashes; human review is needed."
     if pattern.endswith(":transposed_digits"):
         return "Two neighboring digits appear swapped, which is often a typo; human review is needed."
-    if pattern == "ADDRESS_REVIEW:different":
-        return "The addresses point to different locations; human review is needed."
+    address_notes = {
+        "ADDRESS_REVIEW:postal_code_mismatch": "Only the ZIP or postal code differs; human review is needed.",
+        "ADDRESS_REVIEW:state_mismatch": "Only the state differs; human review is needed.",
+        "ADDRESS_REVIEW:city_mismatch": "Only the city differs; human review is needed.",
+        "ADDRESS_REVIEW:street_mismatch": "Only the street address differs; human review is needed.",
+        "ADDRESS_REVIEW:multiple_components_mismatch": "Multiple address components differ; human review is needed.",
+        "ADDRESS_REVIEW:different": "The address could not be matched safely by component; human review is needed.",
+    }
+    if pattern in address_notes:
+        return address_notes[pattern]
     return "The comparison was performed on original values inside the backend."
 
 
@@ -153,15 +259,7 @@ def evaluate(
         if extraction is None:
             continue
         required = POLICY["required"][doc["document_type"]]
-        fields = {}
-        uncertain = set()
-        for line in extraction.lines:
-            label, separator, value = line.text.partition(":")
-            if separator and label.strip() in required:
-                key = label.strip()
-                if key in fields or line.confidence < 0.95:
-                    uncertain.add(key)
-                fields[key] = value.strip()
+        fields, uncertain, boxes = parse_fields(doc["document_type"], extraction)
         if not fields:
             findings.append(
                 finding(
@@ -174,7 +272,7 @@ def evaluate(
                 )
             )
             continue
-        parsed[doc["document_type"]] = (doc, fields, uncertain)
+        parsed[doc["document_type"]] = (doc, fields, uncertain, boxes)
         for key in required:
             value = fields.get(key, "")
             if (
@@ -186,14 +284,14 @@ def evaluate(
             if (
                 value
                 and key in {"Account Number", "Receiving Account"}
-                and not re.fullmatch(r"(?:DEMO|RECV)-[A-Z0-9-]{4,24}", value)
+                and not _valid_account_number(value)
             ):
                 uncertain.add(key)
             evidence = [
                 {
                     "document_id": doc["id"],
                     "page": 1,
-                    "bounding_box": None,
+                    "bounding_box": boxes.get(key),
                     "excerpt": f"{key}: [VALUE WITHHELD]"
                     if value
                     else f"{key}: [blank or label not found on page]",
@@ -240,19 +338,19 @@ def evaluate(
         key = rule["field"]
         candidates = [parsed[kind] for kind in rule["documents"] if kind in parsed]
         candidates = [
-            (doc, fields)
-            for doc, fields, uncertain in candidates
+            (doc, fields, boxes)
+            for doc, fields, uncertain, boxes in candidates
             if fields.get(key) and key not in uncertain
         ]
         values = [
             re.sub(r"\s+", " ", fields[key]).strip().casefold()
-            for _, fields in candidates
+            for _, fields, _ in candidates
         ]
         if key == "SSN":
             values = [value.replace("-", "") for value in values]
         if len(set(values)) > 1:
             pattern = comparison_pattern(
-                rule["id"], key, [fields[key] for _, fields in candidates]
+                rule["id"], key, [fields[key] for _, fields, _ in candidates]
             )
             explanation = (
                 f"{key} differs between supported documents. {difference_note(pattern)}"
@@ -261,10 +359,10 @@ def evaluate(
                 {
                     "document_id": doc["id"],
                     "page": 1,
-                    "bounding_box": None,
+                    "bounding_box": boxes.get(key),
                     "excerpt": f"{key}: [VALUE WITHHELD]",
                 }
-                for doc, _ in candidates
+                for doc, _, boxes in candidates
             ]
             findings.append(
                 finding(
