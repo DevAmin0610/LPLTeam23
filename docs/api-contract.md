@@ -1,10 +1,10 @@
 # ClearPath API contract (v1)
 
-**Starter status:** local routes below are implemented. The AWS presigned-upload routes are a planned contract only; AWS composition and handlers are deferred. See `docs/handoff.md`.
+**Status:** local routes and AWS presigned-upload routes are implemented. AWS composition and Lambda handlers exist but have not been live-validated. The deployed API is configured for Cognito JWT access; frontend OAuth/PKCE and server-side case ownership remain incomplete. See `docs/handoff.md`.
 
 Python source of truth: `backend/app/schemas/models.py`; OpenAPI at `/openapi.json`.
 API base URL defaults to `http://localhost:8000`. JSON errors use `{ "detail": "safe message" }`.
-No auth in MVP: localhost/synthetic use only. All identifiers are UUIDs.
+Local demo mode has no auth and is localhost/synthetic-only. AWS API Gateway requires a Cognito access token with `clearpath/review`, but the backend does not yet enforce per-user case ownership. All identifiers are UUIDs; identifiers are not authorization.
 
 - `GET /api/config`: `{mode: "demo"|"aws", banner: string, privacy_notice: string}`.
 - `POST /api/cases` JSON `{name: string}` -> 201 CaseResponse.

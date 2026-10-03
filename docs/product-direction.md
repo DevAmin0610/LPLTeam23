@@ -16,7 +16,7 @@ Suggested pitch:
 
 **Not implemented:** AgentCore integration, long-term memory extraction/retrieval, structured review reasons, lesson approval/promotion, memory provenance in the UI, or memory-based explanations. Existing review notes are not privacy-filtered and must not be sent directly to a model or memory service. Accepting a finding does not prove a correction was completed; dismissing one does not establish a reusable exception.
 
-**AWS status:** draft adapters and CDK definitions exist, but AWS composition and Lambda handlers are deferred. Resource definitions are not deployed resources. This direction does not authorize deployment, bootstrapping, IAM changes, or resource creation.
+**AWS status:** adapters, AWS composition, Lambda handlers and CDK definitions exist, including AgentCore Memory provisioning, Cognito and CloudFront. They have not been live-validated or deployed. The backend still uses DynamoDB review history rather than AgentCore ingestion/retrieval. Resource definitions are not deployed resources. This direction does not authorize deployment, bootstrapping, IAM changes, or resource creation.
 
 ## Proposed feedback loop
 

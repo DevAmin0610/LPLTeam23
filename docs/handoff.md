@@ -1,6 +1,6 @@
 # Team handoff — intentionally partial MVP
 
-The user requested a minimal pushable baseline instead of finishing every original acceptance criterion. The local vertical slice works; the AWS stack/adapters are **draft, unverified integration code**, not a deployed system.
+The local vertical slice works. AWS adapters, composition, Lambda handlers and expanded CDK resources now exist, but remain **unverified integration code**, not a deployed system.
 
 ## Product direction: planned reviewer-feedback memory loop
 
@@ -26,21 +26,21 @@ Only labeled synthetic fields are parsed; conservative address normalization col
 
 ## AWS work intentionally deferred
 
-`providers/aws/adapters.py` contains lazy boto3 draft adapters for Textract, ApplyGuardrail, Converse, S3, DynamoDB, and asynchronous Lambda dispatch. They are not connected to application startup and have not been tested against AWS. Review their behavior before enabling them; do not advertise live integration.
+`providers/aws/adapters.py` contains lazy boto3 adapters for Textract, ApplyGuardrail, Converse, S3, DynamoDB, and asynchronous Lambda dispatch. AWS composition and Lambda handlers now connect them, but they have not been tested against AWS. Review their behavior before enabling them; do not advertise live integration.
 
 Required before switching modes:
 
-1. Implement a composition factory separate from `main.py`; demo startup must never import or initialize AWS clients.
-2. Implement API and worker handlers at the CDK-reserved paths. Do not create a local thread worker inside Lambda. Match handler lifecycle to AWS providers.
-3. Implement case-bound presigned upload registration/completion, object-size/type validation and immutable source keys after finalization. The frontend client already has the intended API path; backend does not yet implement it.
-4. Add lease/attempt ownership to worker claims, stale-job recovery, async failure reconciliation and bounded durable history. The current local claim is deliberately not sufficient for AWS retries.
-5. Validate privacy behavior with mocked SDK blocked/masked/unchanged/error responses. Fail closed; never send raw IDs or source text to Converse or logs.
-6. Authenticate and enforce server-side case access. CDK's default IAM authorizer is not an advisor login implementation and the frontend does not sign requests.
+1. Live-validate the separate AWS composition and API/worker Lambda handler lifecycle; demo startup must never import or initialize AWS clients.
+2. Live-validate case-bound presigned upload registration/completion, object-size/type validation and immutable source keys after finalization.
+3. Live-validate worker lease/attempt ownership, stale-job recovery, asynchronous failure reconciliation and bounded durable history under Lambda retries.
+4. Validate privacy behavior with mocked SDK blocked/masked/unchanged/error responses. Fail closed; never send raw IDs or source text to Converse or logs.
+5. Complete Cognito OAuth/PKCE in the frontend and enforce server-side case access from verified claims. API Gateway JWT authentication alone is not case authorization.
+6. Implement sanitized, explicitly approved AgentCore lesson ingestion/retrieval and revocation before claiming live semantic learning.
 7. Verify S3/DynamoDB limits, API Gateway PDF delivery, guardrail and model/profile permission details and package size.
 
 ## Infrastructure status
 
-CDK definitions include private S3, DynamoDB, HTTP API, API/worker Lambdas, guardrail and scoped IAM. Existing bucket/table/guardrail identifiers can be supplied through context. No live lookups are needed. **Packaging deliberately fails until the missing Lambda handler files exist.** Only TypeScript compilation is part of this starter validation; no deployment or bootstrap should be run. `infra/test/` is reserved for infrastructure assertions.
+CDK definitions include private S3, DynamoDB, JWT-protected HTTP API, Cognito, API/worker Lambdas, guardrail, AgentCore Memory, private CloudFront hosting and scoped IAM. Existing bucket/table/guardrail/Memory identifiers can be supplied through context. No live lookups are needed. Packaging includes the implemented Lambda handlers, and infrastructure assertions cover authentication, Memory and hosting. No deployment or bootstrap has been run; follow `aws-deployment-runbook.md` only after authorization.
 
 ## Known local limitations
 
